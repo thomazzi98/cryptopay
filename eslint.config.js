@@ -186,6 +186,8 @@ const ALLOWED_SHORT_NAMES = [
   'ui',
   'to',
   'on',
+  // Option names owned by third-party APIs, which cannot be renamed here.
+  'genReqId',
 ];
 
 const INFRASTRUCTURE_ONLY_PACKAGES = [
@@ -280,9 +282,12 @@ export default typescriptEslint.config(
         },
       ],
 
+      // 'after-used' still forbids an unused trailing parameter, while allowing a leading one that a
+      // framework supplies positionally. There is deliberately no argsIgnorePattern: an underscore
+      // prefix would let anything be silenced.
       '@typescript-eslint/no-unused-vars': [
         'error',
-        { args: 'all', caughtErrors: 'all', ignoreRestSiblings: false },
+        { args: 'after-used', caughtErrors: 'all', ignoreRestSiblings: false },
       ],
       'no-unused-vars': 'off',
 

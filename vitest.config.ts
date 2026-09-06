@@ -12,6 +12,13 @@ export default defineConfig({
       },
       {
         test: {
+          name: 'api',
+          root: './apps/api',
+          include: ['src/**/*.spec.ts'],
+        },
+      },
+      {
+        test: {
           name: 'tools',
           include: ['tools/**/*.spec.mjs'],
           // Each assertion boots ESLint against the real flat config and resolves every plugin.
@@ -24,8 +31,8 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       reporter: ['text-summary', 'html', 'lcov'],
-      include: ['packages/*/src/**/*.ts'],
-      exclude: ['**/*.spec.ts', '**/index.ts'],
+      include: ['packages/*/src/**/*.ts', 'apps/api/src/**/*.ts'],
+      exclude: ['**/*.spec.ts', '**/index.ts', '**/main.*.ts'],
       // Thresholds are set per area rather than as one global number. The rules that decide whether
       // a payment completes are held at 100; a single average would let them rot behind easier code.
       // Branch floors sit below line floors because v8 branch counting is noisy around optional

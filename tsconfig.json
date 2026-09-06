@@ -4,6 +4,9 @@
   "references": [
     {
       "path": "./packages/shared/tsconfig.build.json"
+    },
+    {
+      "path": "./apps/api/tsconfig.build.json"
     }
   ]
 }

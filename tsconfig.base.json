@@ -10,7 +10,6 @@
     "resolveJsonModule": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
-
     "strict": true,
     "noImplicitOverride": true,
     "noImplicitReturns": true,
@@ -18,9 +17,12 @@
     "noUncheckedIndexedAccess": true,
     "exactOptionalPropertyTypes": true,
     "noUnusedLocals": true,
-    "noUnusedParameters": true,
+    // Unused parameters are checked by @typescript-eslint/no-unused-vars with args: "after-used",
+    // which allows a leading framework-supplied parameter while still rejecting unused trailing
+    // ones. The compiler flag makes no such distinction and would force an underscore prefix, which
+    // this project bans as an escape hatch.
+    "noUnusedParameters": false,
     "useUnknownInCatchVariables": true,
-
     "declaration": true,
     "declarationMap": true,
     "sourceMap": true,
