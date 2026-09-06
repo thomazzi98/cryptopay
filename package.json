@@ -21,14 +21,15 @@
   ],
   "scripts": {
     "preflight": "node scripts/preflight.mjs",
-    "typecheck": "tsc --build",
+    "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "vitest run",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "knip": "knip",
-    "prepare": "husky"
+    "prepare": "husky",
+    "build": "tsc --build"
   },
   "devDependencies": {
     "@commitlint/cli": "21.2.2",

@@ -310,6 +310,8 @@ export default typescriptEslint.config(
       'unicorn/no-process-exit': 'off',
       'unicorn/prefer-ternary': 'off',
       'unicorn/switch-case-braces': 'off',
+      // Rewrites single-line JSDoc into a block without leading asterisks, which no other tool emits.
+      'unicorn/single-line-block-comment-style': 'off',
       // Cannot see through a Promise, so it misreads every async predicate as a non-boolean.
       'unicorn/consistent-boolean-name': 'off',
       // Named imports document what is used; a default namespace import hides it.
@@ -436,6 +438,8 @@ export default typescriptEslint.config(
       'vitest/no-disabled-tests': 'warn',
       'no-console': 'off',
       'unicorn/name-replacements': 'off',
+      // The import restrictions protect what ships. A spec ships nowhere.
+      'no-restricted-imports': 'off',
     },
   },
 
