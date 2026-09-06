@@ -440,6 +440,9 @@ export default typescriptEslint.config(
       'unicorn/name-replacements': 'off',
       // The import restrictions protect what ships. A spec ships nowhere.
       'no-restricted-imports': 'off',
+      // This rule autofixes http:// to https://. In a spec that asserts a plain-HTTP URL is
+      // rejected, that silently inverts the test into one that proves nothing.
+      'unicorn/prefer-https': 'off',
     },
   },
 

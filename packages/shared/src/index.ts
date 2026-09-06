@@ -4,6 +4,7 @@
  * `@cryptopay/shared/server` and a lint rule enforces the split.
  */
 
+export * from './api-contracts.js';
 export * from './chain-constants.js';
 export * from './ledger-primitives.js';
 export * from './money.js';
