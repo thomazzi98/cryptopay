@@ -21,5 +21,33 @@ export default defineConfig({
         },
       },
     ],
+    coverage: {
+      provider: 'v8',
+      reporter: ['text-summary', 'html', 'lcov'],
+      include: ['packages/*/src/**/*.ts'],
+      exclude: ['**/*.spec.ts', '**/index.ts'],
+      // Thresholds are set per area rather than as one global number. The rules that decide whether
+      // a payment completes are held at 100; a single average would let them rot behind easier code.
+      // Branch floors sit below line floors because v8 branch counting is noisy around optional
+      // chaining and default parameters, and equalising them manufactures failures.
+      thresholds: {
+        lines: 75,
+        functions: 75,
+        branches: 70,
+        statements: 75,
+        'packages/shared/src/payment-transition-table.ts': {
+          lines: 100,
+          functions: 100,
+          branches: 100,
+          statements: 100,
+        },
+        'packages/shared/src/payment-state-machine.ts': {
+          lines: 100,
+          functions: 100,
+          branches: 100,
+          statements: 100,
+        },
+      },
+    },
   },
 });

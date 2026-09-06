@@ -67,6 +67,19 @@ describe('parseAmountToBaseUnits', () => {
   });
 });
 
+describe('the decimals guard', () => {
+  it.each([
+    { description: 'a negative count', decimals: -1 },
+    { description: 'a fractional count', decimals: 6.5 },
+    { description: 'a count beyond any real asset', decimals: 37 },
+    { description: 'not a number', decimals: NaN },
+    { description: 'an unsafe integer', decimals: Number.MAX_SAFE_INTEGER + 2 },
+  ])('rejects $description', ({ decimals }) => {
+    expect(() => parseAmountToBaseUnits('1', decimals)).toThrow(/Unsupported decimals/);
+    expect(() => formatBaseUnits(1n, decimals)).toThrow(/Unsupported decimals/);
+  });
+});
+
 describe('formatBaseUnits', () => {
   it.each([
     [1_000_000n, '1.000000'],
