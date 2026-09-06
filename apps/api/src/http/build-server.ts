@@ -4,7 +4,11 @@ import Fastify, { LogController, type FastifyReply, type FastifyRequest } from '
 import type { Logger } from 'pino';
 
 import { callbackSsrfPolicy, type Configuration } from '../configuration.js';
+import type { CancelPaymentUseCase } from '../application/cancel-payment.use-case.js';
+import type { CreatePaymentUseCase } from '../application/create-payment.use-case.js';
+import type { IdempotencyRepository } from '../infrastructure/persistence/idempotency.repository.js';
 import type { MerchantRepository } from '../infrastructure/persistence/merchant.repository.js';
+import type { PaymentRepository } from '../infrastructure/persistence/payment.repository.js';
 import { runWithRequestContext } from '../observability/logger.js';
 import { createAuthenticationHook } from './authentication.js';
 import {
@@ -15,12 +19,17 @@ import {
 } from './problem-details.js';
 import { registerHealthRoutes } from './routes/health.routes.js';
 import { registerMerchantRoutes } from './routes/merchants.routes.js';
+import { registerPaymentRoutes } from './routes/payments.routes.js';
 import type { ApplicationServer } from './server-types.js';
 
 export interface ServerDependencies {
   readonly configuration: Configuration;
   readonly logger: Logger;
   readonly merchantRepository: MerchantRepository;
+  readonly paymentRepository: PaymentRepository;
+  readonly idempotencyRepository: IdempotencyRepository;
+  readonly paymentCreator: CreatePaymentUseCase;
+  readonly paymentCanceler: CancelPaymentUseCase;
 }
 
 const MAXIMUM_SUPPLIED_REQUEST_ID_LENGTH = 128;
@@ -170,6 +179,15 @@ export function buildServer(dependencies: ServerDependencies): ApplicationServer
     callbackSsrfPolicy: callbackSsrfPolicy(configuration),
   });
   registerMerchantRoutes(server, { merchantRepository, authenticate });
+  registerPaymentRoutes(server, {
+    authenticate,
+    paymentCreator: dependencies.paymentCreator,
+    paymentCanceler: dependencies.paymentCanceler,
+    paymentRepository: dependencies.paymentRepository,
+    merchantRepository,
+    idempotencyRepository: dependencies.idempotencyRepository,
+    checkoutBaseUrl: configuration.publicCheckoutBaseUrl,
+  });
 
   return server;
 }

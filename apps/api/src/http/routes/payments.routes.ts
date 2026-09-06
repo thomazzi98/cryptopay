@@ -1,0 +1,242 @@
+import {
+  CreatePaymentRequestSchema,
+  ListPaymentsQuerySchema,
+  isNetworkIdentifier,
+  isPaymentStatus,
+  type PaymentList,
+} from '@cryptopay/shared';
+
+import type { CancelPaymentUseCase } from '../../application/cancel-payment.use-case.js';
+import type {
+  CreatePaymentFailure,
+  CreatePaymentUseCase,
+} from '../../application/create-payment.use-case.js';
+import { MissingWalletSeedError } from '../../infrastructure/wallet/allocator-provider.js';
+import type { IdempotencyRepository } from '../../infrastructure/persistence/idempotency.repository.js';
+import type { MerchantRepository } from '../../infrastructure/persistence/merchant.repository.js';
+import type { PaymentRepository } from '../../infrastructure/persistence/payment.repository.js';
+import { requireMerchant, type AuthenticationHook } from '../authentication.js';
+import { presentPayment } from '../presenters/payment.presenter.js';
+import { ApplicationError, type ProblemCode } from '../problem-details.js';
+import type { ApplicationServer } from '../server-types.js';
+
+/**
+ * The merchant-facing payment endpoints.
+ *
+ * Creation is idempotent by requirement rather than by courtesy: the header is mandatory, the
+ * reservation is taken before any work runs, and the stored response is written in the same
+ * transaction as the payment it describes.
+ */
+
+export interface PaymentRouteDependencies {
+  readonly authenticate: AuthenticationHook;
+  readonly paymentCreator: CreatePaymentUseCase;
+  readonly paymentCanceler: CancelPaymentUseCase;
+  readonly paymentRepository: PaymentRepository;
+  readonly merchantRepository: MerchantRepository;
+  readonly idempotencyRepository: IdempotencyRepository;
+  readonly checkoutBaseUrl: string;
+}
+
+const FAILURE_CODES: Readonly<Record<CreatePaymentFailure['reason'], ProblemCode>> = Object.freeze({
+  unknown_network: 'validation_failed',
+  environment_mismatch: 'validation_failed',
+  unknown_asset: 'validation_failed',
+  invalid_amount: 'validation_failed',
+  network_not_watched: 'service_unavailable',
+});
+
+function readIdempotencyKey(headerValue: unknown): string {
+  if (typeof headerValue !== 'string' || headerValue.trim() === '') {
+    throw new ApplicationError(
+      'validation_failed',
+      'An Idempotency-Key header is required when creating a payment, so a retry cannot create a second one.',
+    );
+  }
+  if (headerValue.length > 255) {
+    throw new ApplicationError('validation_failed', 'The Idempotency-Key header is too long.');
+  }
+  return headerValue;
+}
+
+export function registerPaymentRoutes(
+  server: ApplicationServer,
+  dependencies: PaymentRouteDependencies,
+): void {
+  const context = { checkoutBaseUrl: dependencies.checkoutBaseUrl };
+
+  server.post('/v1/payments', { preHandler: dependencies.authenticate }, async (request, reply) => {
+    const authenticated = requireMerchant(request);
+    const idempotencyKey = readIdempotencyKey(request.headers['idempotency-key']);
+
+    const parsed = CreatePaymentRequestSchema.safeParse(request.body);
+    if (!parsed.success) {
+      throw new ApplicationError(
+        'validation_failed',
+        'The payment could not be created from this request.',
+        parsed.error.issues.map((issue) => ({
+          path: issue.path.join('.'),
+          message: issue.message,
+        })),
+      );
+    }
+
+    const rawBody = JSON.stringify(request.body ?? {});
+    const reservation = await dependencies.idempotencyRepository.reserve({
+      merchantId: authenticated.merchantId,
+      idempotencyKey,
+      method: 'POST',
+      path: '/v1/payments',
+      body: rawBody,
+    });
+
+    if (reservation.kind === 'fingerprint_mismatch') {
+      throw new ApplicationError(
+        'validation_failed',
+        'This Idempotency-Key was already used with a different request body.',
+      );
+    }
+    if (reservation.kind === 'in_progress') {
+      void reply.header('retry-after', String(reservation.retryAfterSeconds));
+      throw new ApplicationError(
+        'rate_limited',
+        'An identical request is already being processed. Retry shortly.',
+      );
+    }
+    if (reservation.kind === 'replay') {
+      await reply
+        .code(reservation.status)
+        .header('idempotency-replayed', 'true')
+        .type('application/json')
+        .send(reservation.body);
+      return;
+    }
+
+    const merchant = await dependencies.merchantRepository.findById(authenticated.merchantId);
+    if (merchant === null) {
+      await dependencies.idempotencyRepository.abandon(authenticated.merchantId, idempotencyKey);
+      throw new ApplicationError('resource_not_found', 'The merchant no longer exists.');
+    }
+
+    try {
+      const result = await dependencies.paymentCreator.execute({
+        merchant,
+        environment: authenticated.environment,
+        request: parsed.data,
+        // Placed inside the payment's transaction so a stored response cannot outlive a rolled back
+        // payment, nor a payment exist without the response a retry will be given.
+        onPersist: async (client, payment) => {
+          await dependencies.idempotencyRepository.complete(
+            client,
+            authenticated.merchantId,
+            idempotencyKey,
+            201,
+            JSON.stringify(presentPayment(payment, context)),
+          );
+        },
+      });
+
+      if (result.kind === 'failed') {
+        await dependencies.idempotencyRepository.abandon(authenticated.merchantId, idempotencyKey);
+        throw new ApplicationError(FAILURE_CODES[result.failure.reason], result.failure.detail);
+      }
+
+      await reply.code(201).send(presentPayment(result.payment, context));
+    } catch (error) {
+      if (error instanceof ApplicationError) {
+        throw error;
+      }
+      await dependencies.idempotencyRepository.abandon(authenticated.merchantId, idempotencyKey);
+
+      if (error instanceof MissingWalletSeedError) {
+        request.log.error(
+          { event: 'payment.wallet_seed_missing', environment: authenticated.environment },
+          error.message,
+        );
+        throw new ApplicationError(
+          'service_unavailable',
+          'This environment cannot issue payment addresses yet. The operator has been notified.',
+        );
+      }
+      throw error;
+    }
+  });
+
+  server.get('/v1/payments', { preHandler: dependencies.authenticate }, async (request, reply) => {
+    const authenticated = requireMerchant(request);
+    const parsed = ListPaymentsQuerySchema.safeParse(request.query);
+    if (!parsed.success) {
+      throw new ApplicationError(
+        'validation_failed',
+        'The payment list could not be read from these query parameters.',
+        parsed.error.issues.map((issue) => ({
+          path: issue.path.join('.'),
+          message: issue.message,
+        })),
+      );
+    }
+
+    const query = parsed.data;
+    const page = await dependencies.paymentRepository.list({
+      merchantId: authenticated.merchantId,
+      environment: authenticated.environment,
+      limit: query.limit,
+      ...(query.status !== undefined && isPaymentStatus(query.status) && { status: query.status }),
+      ...(query.network !== undefined &&
+        isNetworkIdentifier(query.network) && { networkIdentifier: query.network }),
+      ...(query.merchantReference !== undefined && { merchantReference: query.merchantReference }),
+      ...(query.createdAfter !== undefined && { createdAfter: new Date(query.createdAfter) }),
+      ...(query.createdBefore !== undefined && { createdBefore: new Date(query.createdBefore) }),
+      ...(query.startingAfter !== undefined && { startingAfter: query.startingAfter }),
+    });
+
+    const body: PaymentList = {
+      data: page.payments.map((payment) => presentPayment(payment, context)),
+      hasMore: page.hasMore,
+      nextCursor: page.nextCursor,
+    };
+    await reply.code(200).send(body);
+  });
+
+  server.get<{ Params: { paymentId: string } }>(
+    '/v1/payments/:paymentId',
+    { preHandler: dependencies.authenticate },
+    async (request, reply) => {
+      const authenticated = requireMerchant(request);
+      const payment = await dependencies.paymentRepository.findById(
+        authenticated.merchantId,
+        request.params.paymentId,
+      );
+
+      // Another merchant's payment answers 404 rather than 403, because 403 would confirm that the
+      // identifier exists.
+      if (payment === null) {
+        throw new ApplicationError('resource_not_found', 'No such payment.');
+      }
+      await reply.code(200).send(presentPayment(payment, context));
+    },
+  );
+
+  server.post<{ Params: { paymentId: string } }>(
+    '/v1/payments/:paymentId/cancel',
+    { preHandler: dependencies.authenticate },
+    async (request, reply) => {
+      const authenticated = requireMerchant(request);
+      const result = await dependencies.paymentCanceler.execute(
+        authenticated.merchantId,
+        request.params.paymentId,
+      );
+
+      if (result.kind === 'not_found') {
+        throw new ApplicationError('resource_not_found', 'No such payment.');
+      }
+      if (result.kind === 'rejected') {
+        throw new ApplicationError(
+          'validation_failed',
+          `${result.detail} The payment is currently ${result.currentStatus}.`,
+        );
+      }
+      await reply.code(200).send(presentPayment(result.payment, context));
+    },
+  );
+}

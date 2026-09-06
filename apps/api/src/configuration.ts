@@ -44,6 +44,9 @@ const ConfigurationSchema = z
      */
     apiKeyPepper: z.string().min(32, 'API_KEY_PEPPER must be at least 32 characters'),
 
+    /** Where the hosted checkout is served from. Payment responses build their checkoutUrl on it. */
+    publicCheckoutBaseUrl: z.url().default('http://localhost:3000/pay'),
+
     /**
      * Wraps the data key that encrypts each environment's master seed. Whoever can read this value
      * can unwrap every unswept deposit key, which is the largest honest limitation of the current
@@ -106,6 +109,7 @@ export function loadConfiguration(source: EnvironmentSource): Configuration {
     logLevel: source.LOG_LEVEL,
     databaseUrl: source.DATABASE_URL,
     apiKeyPepper: source.API_KEY_PEPPER,
+    publicCheckoutBaseUrl: source.PUBLIC_CHECKOUT_BASE_URL,
     walletKeyEncryptionKey: source.WALLET_KEY_ENCRYPTION_KEY,
     callbackPrivateDestinationAllowlist: parseCommaSeparated(
       source.CALLBACK_PRIVATE_DESTINATION_ALLOWLIST,

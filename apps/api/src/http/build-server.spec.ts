@@ -1,9 +1,10 @@
 import { pino } from 'pino';
+
+import { createDatabasePool } from '../infrastructure/persistence/database.js';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { buildApplicationServer } from '../composition-root.js';
 import { loadConfiguration, type EnvironmentSource } from '../configuration.js';
-import { MerchantRepository } from '../infrastructure/persistence/merchant.repository.js';
-import { buildServer } from './build-server.js';
 import type { ApplicationServer } from './server-types.js';
 import { PROBLEM_CATALOG, PROBLEM_CONTENT_TYPE } from './problem-details.js';
 
@@ -16,11 +17,13 @@ const REQUIRED_ENVIRONMENT = {
 
 function createServer(variables: EnvironmentSource = {}): ApplicationServer {
   const configuration = loadConfiguration({ ...REQUIRED_ENVIRONMENT, ...variables });
-  const logger = pino({ level: 'silent' });
-  // These specs exercise routes that never reach the database; a pool is created but not connected
-  // to, which is what makes them fast unit tests rather than integration tests.
-  const merchantRepository = new MerchantRepository(undefined as never);
-  return buildServer({ configuration, logger, merchantRepository });
+  // These specs exercise health, routing and error shaping, none of which reach the database, so
+  // the pool is constructed but never connected to. That is what keeps them unit tests.
+  return buildApplicationServer(
+    configuration,
+    pino({ level: 'silent' }),
+    createDatabasePool(configuration),
+  );
 }
 
 describe('the HTTP server', () => {
