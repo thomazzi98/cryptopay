@@ -440,11 +440,16 @@ export default typescriptEslint.config(
     rules: {
       ...vitest.configs.recommended.rules,
       'vitest/no-focused-tests': 'error',
+      // Assertions are frequently wrapped in a named helper so the intent reads in the test name.
+      'vitest/expect-expect': ['error', { assertFunctionNames: ['expect', 'expect*', 'assert*'] }],
       'vitest/no-disabled-tests': 'warn',
       'no-console': 'off',
       'unicorn/name-replacements': 'off',
       // The import restrictions protect what ships. A spec ships nowhere.
       'no-restricted-imports': 'off',
+      // Assigning a module-level binding from beforeAll is how every framework-managed fixture is
+      // wired; the rule would forbid the standard lifecycle.
+      'unicorn/no-top-level-assignment-in-function': 'off',
       // This rule autofixes http:// to https://. In a spec that asserts a plain-HTTP URL is
       // rejected, that silently inverts the test into one that proves nothing.
       'unicorn/prefer-https': 'off',
