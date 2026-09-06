@@ -11,6 +11,7 @@ const REQUIRED: EnvironmentSource = {
   NODE_ENV: 'test',
   DATABASE_URL: 'postgresql://cryptopay:cryptopay@127.0.0.1:5432/cryptopay',
   API_KEY_PEPPER: 'a'.repeat(32),
+  WALLET_KEY_ENCRYPTION_KEY: Buffer.alloc(32, 3).toString('base64'),
 };
 
 function environment(overrides: EnvironmentSource = {}): EnvironmentSource {
@@ -55,6 +56,11 @@ describe('loadConfiguration', () => {
       variables: { DATABASE_URL: 'mysql://x/y' },
     },
     { description: 'a short api key pepper', variables: { API_KEY_PEPPER: 'too-short' } },
+    { description: 'a missing wallet key', variables: { WALLET_KEY_ENCRYPTION_KEY: undefined } },
+    {
+      description: 'a wallet key of the wrong size',
+      variables: { WALLET_KEY_ENCRYPTION_KEY: Buffer.alloc(16, 1).toString('base64') },
+    },
     { description: 'a port above the valid range', variables: { PORT: '70000' } },
     { description: 'a port that is not a number', variables: { PORT: 'http' } },
     { description: 'an unknown log level', variables: { LOG_LEVEL: 'chatty' } },

@@ -8,13 +8,18 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "start": "node --env-file-if-exists=../../.env dist/main.api.js",
     "dev": "node --env-file-if-exists=../../.env --watch src/main.api.ts",
-    "db:migrate": "node --env-file-if-exists=../../.env dist/infrastructure/persistence/migrate-cli.js"
+    "db:migrate": "node --env-file-if-exists=../../.env dist/infrastructure/persistence/migrate-cli.js",
+    "wallet:provision": "node --env-file-if-exists=../../.env dist/infrastructure/wallet/provision-seed-cli.js"
   },
   "dependencies": {
     "@cryptopay/shared": "0.1.0",
+    "@noble/curves": "2.4.0",
+    "@scure/bip32": "2.4.0",
+    "@scure/bip39": "2.4.0",
     "fastify": "5.12.3",
     "pg": "8.23.0",
     "pino": "10.3.1",
+    "viem": "2.56.3",
     "zod": "4.5.4"
   },
   "devDependencies": {

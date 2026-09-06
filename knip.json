@@ -13,6 +13,7 @@
       "entry": [
         "src/main.*.ts",
         "src/infrastructure/persistence/migrate-cli.ts",
+        "src/infrastructure/wallet/provision-seed-cli.ts",
         "src/**/*.spec.ts",
         "test/**/*.spec.ts",
         "test/setup/*.ts"

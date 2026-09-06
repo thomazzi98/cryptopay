@@ -45,6 +45,17 @@ const ConfigurationSchema = z
     apiKeyPepper: z.string().min(32, 'API_KEY_PEPPER must be at least 32 characters'),
 
     /**
+     * Wraps the data key that encrypts each environment's master seed. Whoever can read this value
+     * can unwrap every unswept deposit key, which is the largest honest limitation of the current
+     * design and is documented rather than disguised.
+     */
+    walletKeyEncryptionKey: z
+      .string()
+      .refine((value) => Buffer.from(value, 'base64').length === 32, {
+        message: 'WALLET_KEY_ENCRYPTION_KEY must be 32 bytes encoded as base64',
+      }),
+
+    /**
      * Explicit `host:port` destinations that bypass only the private-address check when delivering a
      * callback, so the bundled demo receiver can be reached during development.
      *
@@ -95,6 +106,7 @@ export function loadConfiguration(source: EnvironmentSource): Configuration {
     logLevel: source.LOG_LEVEL,
     databaseUrl: source.DATABASE_URL,
     apiKeyPepper: source.API_KEY_PEPPER,
+    walletKeyEncryptionKey: source.WALLET_KEY_ENCRYPTION_KEY,
     callbackPrivateDestinationAllowlist: parseCommaSeparated(
       source.CALLBACK_PRIVATE_DESTINATION_ALLOWLIST,
     ),

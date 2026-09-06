@@ -11,6 +11,7 @@ const REQUIRED_ENVIRONMENT = {
   NODE_ENV: 'test',
   DATABASE_URL: 'postgresql://cryptopay:cryptopay@127.0.0.1:5432/cryptopay',
   API_KEY_PEPPER: 'a'.repeat(32),
+  WALLET_KEY_ENCRYPTION_KEY: Buffer.alloc(32, 3).toString('base64'),
 };
 
 function createServer(variables: EnvironmentSource = {}): ApplicationServer {

@@ -84,6 +84,7 @@ beforeAll(async () => {
     NODE_ENV: 'test',
     DATABASE_URL: connectionUrlFor(isolated.databaseName, port),
     API_KEY_PEPPER: PEPPER,
+    WALLET_KEY_ENCRYPTION_KEY: Buffer.alloc(32, 3).toString('base64'),
   });
   server = buildServer({
     configuration,

@@ -188,6 +188,7 @@ const ALLOWED_SHORT_NAMES = [
   'on',
   // Option names owned by third-party APIs, which cannot be renamed here.
   'genReqId',
+  'authTagLength',
 ];
 
 const INFRASTRUCTURE_ONLY_PACKAGES = [
