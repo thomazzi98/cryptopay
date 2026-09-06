@@ -1,0 +1,33 @@
+{
+  "name": "cryptopay",
+  "version": "0.1.0",
+  "description": "Crypto payment processor with independent on-chain verification, built for Polygon",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "author": "Rafael Thomazzi",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/thomazzi98/cryptopay.git"
+  },
+  "packageManager": "npm@11.6.2",
+  "engines": {
+    "node": ">=24.11.1 <25.0.0",
+    "npm": ">=11.6.0"
+  },
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "preflight": "node scripts/preflight.mjs",
+    "typecheck": "tsc --build",
+    "test": "vitest run --passWithNoTests"
+  },
+  "devDependencies": {
+    "@types/node": "24.13.3",
+    "@vitest/coverage-v8": "4.1.11",
+    "typescript": "6.0.3",
+    "vitest": "4.1.11"
+  }
+}
