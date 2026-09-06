@@ -5,6 +5,12 @@ import { describe, expect, it } from 'vitest';
 import { loadConfiguration } from '../configuration.js';
 import { createLogger, currentRequestContext, runWithRequestContext } from './logger.js';
 
+const REQUIRED_ENVIRONMENT = {
+  NODE_ENV: 'test',
+  DATABASE_URL: 'postgresql://cryptopay:cryptopay@127.0.0.1:5432/cryptopay',
+  API_KEY_PEPPER: 'a'.repeat(32),
+};
+
 function captureLogOutput(write: (logger: ReturnType<typeof createLogger>) => void): string[] {
   const lines: string[] = [];
   const destination = new Writable({
@@ -14,7 +20,7 @@ function captureLogOutput(write: (logger: ReturnType<typeof createLogger>) => vo
     },
   });
 
-  const configuration = loadConfiguration({ NODE_ENV: 'test', LOG_LEVEL: 'trace' });
+  const configuration = loadConfiguration({ ...REQUIRED_ENVIRONMENT, LOG_LEVEL: 'trace' });
   write(createLogger(configuration, destination));
   return lines;
 }

@@ -4,7 +4,9 @@ import Fastify, { LogController, type FastifyReply, type FastifyRequest } from '
 import type { Logger } from 'pino';
 
 import { callbackSsrfPolicy, type Configuration } from '../configuration.js';
+import type { MerchantRepository } from '../infrastructure/persistence/merchant.repository.js';
 import { runWithRequestContext } from '../observability/logger.js';
+import { createAuthenticationHook } from './authentication.js';
 import {
   ApplicationError,
   PROBLEM_CONTENT_TYPE,
@@ -12,11 +14,13 @@ import {
   toUnexpectedProblemDetails,
 } from './problem-details.js';
 import { registerHealthRoutes } from './routes/health.routes.js';
+import { registerMerchantRoutes } from './routes/merchants.routes.js';
 import type { ApplicationServer } from './server-types.js';
 
 export interface ServerDependencies {
   readonly configuration: Configuration;
   readonly logger: Logger;
+  readonly merchantRepository: MerchantRepository;
 }
 
 const MAXIMUM_SUPPLIED_REQUEST_ID_LENGTH = 128;
@@ -85,7 +89,7 @@ function readMessage(error: unknown): string {
  * request has no cross-origin policy to get wrong.
  */
 export function buildServer(dependencies: ServerDependencies): ApplicationServer {
-  const { configuration, logger } = dependencies;
+  const { configuration, logger, merchantRepository } = dependencies;
 
   const server = Fastify({
     loggerInstance: logger,
@@ -156,10 +160,16 @@ export function buildServer(dependencies: ServerDependencies): ApplicationServer
     void reply.code(problem.status).type(PROBLEM_CONTENT_TYPE).send(problem);
   });
 
+  const authenticate = createAuthenticationHook({
+    merchantRepository,
+    apiKeyPepper: configuration.apiKeyPepper,
+  });
+
   registerHealthRoutes(server, {
     startedAtMilliseconds: Date.now(),
     callbackSsrfPolicy: callbackSsrfPolicy(configuration),
   });
+  registerMerchantRoutes(server, { merchantRepository, authenticate });
 
   return server;
 }

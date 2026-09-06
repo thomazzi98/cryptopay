@@ -1,6 +1,10 @@
+import type { Pool } from 'pg';
+
 import { type Configuration, loadConfiguration } from './configuration.js';
 import { buildServer } from './http/build-server.js';
 import type { ApplicationServer } from './http/server-types.js';
+import { createDatabasePool } from './infrastructure/persistence/database.js';
+import { MerchantRepository } from './infrastructure/persistence/merchant.repository.js';
 import { createLogger } from './observability/logger.js';
 
 /**
@@ -12,12 +16,15 @@ import { createLogger } from './observability/logger.js';
 export interface Application {
   readonly configuration: Configuration;
   readonly server: ApplicationServer;
+  readonly databasePool: Pool;
 }
 
 export function composeApplication(source: NodeJS.ProcessEnv): Application {
   const configuration = loadConfiguration(source);
   const logger = createLogger(configuration);
-  const server = buildServer({ configuration, logger });
+  const databasePool = createDatabasePool(configuration);
+  const merchantRepository = new MerchantRepository(databasePool);
+  const server = buildServer({ configuration, logger, merchantRepository });
 
-  return { configuration, server };
+  return { configuration, server, databasePool };
 }

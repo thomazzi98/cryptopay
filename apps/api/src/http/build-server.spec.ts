@@ -2,14 +2,24 @@ import { pino } from 'pino';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { loadConfiguration, type EnvironmentSource } from '../configuration.js';
+import { MerchantRepository } from '../infrastructure/persistence/merchant.repository.js';
 import { buildServer } from './build-server.js';
 import type { ApplicationServer } from './server-types.js';
 import { PROBLEM_CATALOG, PROBLEM_CONTENT_TYPE } from './problem-details.js';
 
+const REQUIRED_ENVIRONMENT = {
+  NODE_ENV: 'test',
+  DATABASE_URL: 'postgresql://cryptopay:cryptopay@127.0.0.1:5432/cryptopay',
+  API_KEY_PEPPER: 'a'.repeat(32),
+};
+
 function createServer(variables: EnvironmentSource = {}): ApplicationServer {
-  const configuration = loadConfiguration({ NODE_ENV: 'test', ...variables });
+  const configuration = loadConfiguration({ ...REQUIRED_ENVIRONMENT, ...variables });
   const logger = pino({ level: 'silent' });
-  return buildServer({ configuration, logger });
+  // These specs exercise routes that never reach the database; a pool is created but not connected
+  // to, which is what makes them fast unit tests rather than integration tests.
+  const merchantRepository = new MerchantRepository(undefined as never);
+  return buildServer({ configuration, logger, merchantRepository });
 }
 
 describe('the HTTP server', () => {

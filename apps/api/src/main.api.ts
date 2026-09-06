@@ -8,11 +8,12 @@ import { ConfigurationError } from './configuration.js';
  */
 
 async function main(): Promise<void> {
-  const { configuration, server } = composeApplication(process.env);
+  const { configuration, server, databasePool } = composeApplication(process.env);
 
   const shutdown = async (signal: string): Promise<void> => {
     server.log.info({ event: 'api.shutdown_requested', signal }, 'draining connections');
     await server.close();
+    await databasePool.end();
     server.log.info({ event: 'api.shutdown_completed' }, 'closed');
   };
 

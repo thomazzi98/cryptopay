@@ -31,6 +31,19 @@ const ConfigurationSchema = z
       .enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent'])
       .default('info'),
 
+    databaseUrl: z
+      .string()
+      .min(1, 'DATABASE_URL is required')
+      .refine((value) => value.startsWith('postgres://') || value.startsWith('postgresql://'), {
+        message: 'DATABASE_URL must be a PostgreSQL connection string',
+      }),
+
+    /**
+     * Peppers the API key digests. A database copy alone then does not permit offline verification
+     * of a stolen key list, because the pepper lives only in the process environment.
+     */
+    apiKeyPepper: z.string().min(32, 'API_KEY_PEPPER must be at least 32 characters'),
+
     /**
      * Explicit `host:port` destinations that bypass only the private-address check when delivering a
      * callback, so the bundled demo receiver can be reached during development.
@@ -80,6 +93,8 @@ export function loadConfiguration(source: EnvironmentSource): Configuration {
     host: source.HOST,
     port: source.PORT,
     logLevel: source.LOG_LEVEL,
+    databaseUrl: source.DATABASE_URL,
+    apiKeyPepper: source.API_KEY_PEPPER,
     callbackPrivateDestinationAllowlist: parseCommaSeparated(
       source.CALLBACK_PRIVATE_DESTINATION_ALLOWLIST,
     ),

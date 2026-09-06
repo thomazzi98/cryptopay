@@ -7,8 +7,14 @@ import {
   loadConfiguration,
 } from './configuration.js';
 
+const REQUIRED: EnvironmentSource = {
+  NODE_ENV: 'test',
+  DATABASE_URL: 'postgresql://cryptopay:cryptopay@127.0.0.1:5432/cryptopay',
+  API_KEY_PEPPER: 'a'.repeat(32),
+};
+
 function environment(overrides: EnvironmentSource = {}): EnvironmentSource {
-  return { NODE_ENV: 'test', ...overrides };
+  return { ...REQUIRED, ...overrides };
 }
 
 function load(overrides: EnvironmentSource = {}) {
@@ -19,6 +25,7 @@ const loadWithOversizedPort = () => load({ PORT: '70000' });
 
 const loadProductionWithPrivateAllowlist = () =>
   loadConfiguration({
+    ...REQUIRED,
     NODE_ENV: 'production',
     CALLBACK_PRIVATE_DESTINATION_ALLOWLIST: '127.0.0.1:4001',
   });
@@ -42,6 +49,12 @@ describe('loadConfiguration', () => {
   });
 
   it.each([
+    { description: 'a missing database url', variables: { DATABASE_URL: undefined } },
+    {
+      description: 'a database url for another engine',
+      variables: { DATABASE_URL: 'mysql://x/y' },
+    },
+    { description: 'a short api key pepper', variables: { API_KEY_PEPPER: 'too-short' } },
     { description: 'a port above the valid range', variables: { PORT: '70000' } },
     { description: 'a port that is not a number', variables: { PORT: 'http' } },
     { description: 'an unknown log level', variables: { LOG_LEVEL: 'chatty' } },
@@ -91,11 +104,12 @@ describe('the callback private destination allowlist', () => {
   });
 
   it('starts in production when the allowlist is empty', () => {
-    expect(() => loadConfiguration({ NODE_ENV: 'production' })).not.toThrow();
+    expect(() => loadConfiguration({ ...REQUIRED, NODE_ENV: 'production' })).not.toThrow();
   });
 
   it('allows the same list outside production, where the demo receiver lives', () => {
     const configuration = loadConfiguration({
+      ...REQUIRED,
       NODE_ENV: 'development',
       CALLBACK_PRIVATE_DESTINATION_ALLOWLIST: '127.0.0.1:4001',
     });
