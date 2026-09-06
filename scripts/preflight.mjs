@@ -155,16 +155,16 @@ async function readGitSetting(key) {
 }
 
 async function checkGitIdentity() {
-  const userName = await readGitSetting('user.name');
+  const username = await readGitSetting('user.name');
   const userEmail = await readGitSetting('user.email');
-  if (userName === '' || userEmail === '') {
+  if (username === '' || userEmail === '') {
     return failed(
       'git identity',
       'user.name or user.email is unset',
       'Run: git config user.name "Your Name" then git config user.email "you@example.com"',
     );
   }
-  return passed('git identity', `${userName} <${userEmail}>`);
+  return passed('git identity', `${username} <${userEmail}>`);
 }
 
 async function checkDockerDaemon() {

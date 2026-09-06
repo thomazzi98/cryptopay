@@ -22,12 +22,41 @@
   "scripts": {
     "preflight": "node scripts/preflight.mjs",
     "typecheck": "tsc --build",
-    "test": "vitest run --passWithNoTests"
+    "test": "vitest run",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "knip": "knip",
+    "prepare": "husky"
   },
   "devDependencies": {
+    "@commitlint/cli": "21.2.2",
+    "@commitlint/config-conventional": "21.2.2",
+    "@eslint-community/eslint-plugin-eslint-comments": "4.7.2",
+    "@eslint/js": "10.0.1",
     "@types/node": "24.13.3",
     "@vitest/coverage-v8": "4.1.11",
+    "@vitest/eslint-plugin": "1.6.27",
+    "eslint": "10.10.0",
+    "eslint-config-prettier": "10.1.8",
+    "eslint-plugin-unicorn": "74.0.0",
+    "globals": "17.12.0",
+    "husky": "9.1.7",
+    "knip": "6.34.0",
+    "lint-staged": "17.5.0",
+    "prettier": "3.9.6",
     "typescript": "6.0.3",
+    "typescript-eslint": "8.69.0",
     "vitest": "4.1.11"
+  },
+  "lint-staged": {
+    "*.{ts,tsx,js,mjs}": [
+      "eslint --fix",
+      "prettier --write"
+    ],
+    "*.{json,md,yml,yaml,css}": [
+      "prettier --write"
+    ]
   }
 }

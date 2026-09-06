@@ -6,14 +6,14 @@ cost time once.
 
 ## Code style — enforced by lint, not by review
 
-| Rule | Why |
-| --- | --- |
-| **No `else`** | Guard clauses, early returns, lookup maps, or a `switch` on a discriminated union. `no-else-return` alone is not enough; the config bans `IfStatement > .alternate` outright. |
+| Rule                           | Why                                                                                                                                                                                                                          |
+| ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **No `else`**                  | Guard clauses, early returns, lookup maps, or a `switch` on a discriminated union. `no-else-return` alone is not enough; the config bans `IfStatement > .alternate` outright.                                                |
 | **No abbreviated identifiers** | `request` not `req`, `response` not `res`, `transaction` not `tx`, `address` not `addr`, `amount` not `amt`, `configuration` not `cfg`. Established acronyms (`id`, `url`, `api`, `http`, `rpc`, `hmac`, `sql`) are allowed. |
-| **English only** | Identifiers, comments, logs, errors, commit messages, documentation. Non-ASCII string literals are rejected. |
-| **Comments are rare** | Explain a non-obvious decision, a security constraint, or chain-specific behaviour. Never restate the code. If a function needs a paragraph, the function is wrong. |
-| **No dead code** | No unused files, exports, dependencies, or commented-out blocks. `knip` runs in CI and sees what identifier linting cannot. |
-| **No placeholders** | No `TODO` for core functionality, no `throw new Error('Not implemented')`, no fake data in a real code path. Mocks belong in tests only. |
+| **English only**               | Identifiers, comments, logs, errors, commit messages, documentation. Non-ASCII string literals are rejected.                                                                                                                 |
+| **Comments are rare**          | Explain a non-obvious decision, a security constraint, or chain-specific behaviour. Never restate the code. If a function needs a paragraph, the function is wrong.                                                          |
+| **No dead code**               | No unused files, exports, dependencies, or commented-out blocks. `knip` runs in CI and sees what identifier linting cannot.                                                                                                  |
+| **No placeholders**            | No `TODO` for core functionality, no `throw new Error('Not implemented')`, no fake data in a real code path. Mocks belong in tests only.                                                                                     |
 
 Disabling a lint rule inline requires a description, and the two rules above cannot be disabled at
 all. Without that, the first hard case gets an `eslint-disable` and the mandate is over.
@@ -37,25 +37,25 @@ rule. This is what keeps a second chain an adapter instead of a rewrite.
 
 Exact versions, no carets, one root lockfile. Rationale for the non-obvious ones:
 
-| Package | Pin | Why not `latest` |
-| --- | --- | --- |
-| `typescript` | **6.0.3** | `latest` is 7.0.2, the native Go port. `typescript-eslint` declares `typescript: ">=4.8.4 <6.1.0"` — TypeScript 7 breaks linting outright. |
-| `vitest` / `@vitest/coverage-v8` | **4.1.11** | `latest` is 5.0.0, days old. Its headline benefit is Oxc decorator metadata and this codebase has zero decorators. |
-| `vite` | **not pinned at all** | Vitest resolves its own compatible Vite. Pinning it independently is what creates the peer conflict. |
-| `prisma` / `@prisma/client` | **7.10.0** | `npm install prisma` resolves `8.0.0-rc.13` from the `latest` dist-tag — a release candidate. Both packages must match exactly or the query engine skews from the client. |
-| `@types/node` | **24.13.3** | Must track the Node major (24), not `latest` (26.x). |
+| Package                          | Pin                   | Why not `latest`                                                                                                                                                          |
+| -------------------------------- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `typescript`                     | **6.0.3**             | `latest` is 7.0.2, the native Go port. `typescript-eslint` declares `typescript: ">=4.8.4 <6.1.0"` — TypeScript 7 breaks linting outright.                                |
+| `vitest` / `@vitest/coverage-v8` | **4.1.11**            | `latest` is 5.0.0, days old. Its headline benefit is Oxc decorator metadata and this codebase has zero decorators.                                                        |
+| `vite`                           | **not pinned at all** | Vitest resolves its own compatible Vite. Pinning it independently is what creates the peer conflict.                                                                      |
+| `prisma` / `@prisma/client`      | **7.10.0**            | `npm install prisma` resolves `8.0.0-rc.13` from the `latest` dist-tag — a release candidate. Both packages must match exactly or the query engine skews from the client. |
+| `@types/node`                    | **24.13.3**           | Must track the Node major (24), not `latest` (26.x).                                                                                                                      |
 
 ## Framework traps
 
 **wagmi v3 renamed the core hooks.** Most tutorials and most training data are v2:
 
-| v2 | v3 |
-| --- | --- |
-| `useAccount()` | `useConnection()` |
-| `useAccountEffect()` | `useConnectionEffect()` |
-| `useSwitchAccount()` | `useSwitchConnection()` |
+| v2                                        | v3                                                     |
+| ----------------------------------------- | ------------------------------------------------------ |
+| `useAccount()`                            | `useConnection()`                                      |
+| `useAccountEffect()`                      | `useConnectionEffect()`                                |
+| `useSwitchAccount()`                      | `useSwitchConnection()`                                |
 | `connectors` / `chains` off a hook result | `useConnectors()` / `useChains()` / `useConnections()` |
-| mutation called directly | `.mutate` / `.mutateAsync` |
+| mutation called directly                  | `.mutate` / `.mutateAsync`                             |
 
 Use `useConnection().chainId` (the wallet's real chain) for the chain guard, never `useChainId()`
 (the config's idea of the chain).
