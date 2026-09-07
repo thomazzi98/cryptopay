@@ -36,6 +36,20 @@ export class EvaluationQueueRepository {
     return result.rowCount ?? 0;
   }
 
+  /**
+   * Queues one payment now, ahead of the next sweep.
+   *
+   * Used by the browser hint, which is a latency optimisation and nothing more: the payment is
+   * looked at sooner, and every figure is still re-derived from the chain.
+   */
+  async enqueue(paymentId: string): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO payment_evaluation_queue (payment_id) VALUES ($1)
+       ON CONFLICT (payment_id) DO NOTHING`,
+      [paymentId],
+    );
+  }
+
   async claim(
     workerIdentity: string,
     limit: number,

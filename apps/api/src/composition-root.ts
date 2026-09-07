@@ -79,6 +79,7 @@ export function buildApplicationServer(
   const paymentTransferRepository = new PaymentTransferRepository(databasePool);
   const webhookDeliveryRepository = new WebhookDeliveryRepository(databasePool);
   const webhookSecretRepository = new WebhookSecretRepository(databasePool);
+  const evaluationQueueRepository = new EvaluationQueueRepository(databasePool);
 
   const walletAllocators = new WalletAllocatorProvider(
     walletSeedRepository,
@@ -113,6 +114,7 @@ export function buildApplicationServer(
     webhookSecretRepository,
     blockCursorRepository,
     ulidFactory,
+    evaluationQueueRepository,
   });
 }
 
