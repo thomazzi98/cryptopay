@@ -3,11 +3,10 @@ import type { Pool } from 'pg';
 import { pino } from 'pino';
 import { afterAll, beforeAll, describe, expect, inject, it } from 'vitest';
 
+import { buildApplicationServer } from '../src/composition-root.js';
 import { loadConfiguration } from '../src/configuration.js';
-import { buildServer } from '../src/http/build-server.js';
 import type { ApplicationServer } from '../src/http/server-types.js';
 import { generateApiKey } from '../src/infrastructure/crypto/api-key.js';
-import { MerchantRepository } from '../src/infrastructure/persistence/merchant.repository.js';
 import { UlidFactory } from '../src/infrastructure/system/ulid.js';
 import { connectionUrlFor, createIsolatedDatabase } from './setup/postgres.global-setup.js';
 
@@ -86,11 +85,9 @@ beforeAll(async () => {
     API_KEY_PEPPER: PEPPER,
     WALLET_KEY_ENCRYPTION_KEY: Buffer.alloc(32, 3).toString('base64'),
   });
-  server = buildServer({
-    configuration,
-    logger: pino({ level: 'silent' }),
-    merchantRepository: new MerchantRepository(pool),
-  });
+  // The real wiring, not a partial one. A server assembled by hand in a test drifts from the server
+  // the process actually runs, and then proves nothing about it.
+  server = buildApplicationServer(configuration, pino({ level: 'silent' }), pool);
 });
 
 afterAll(async () => {

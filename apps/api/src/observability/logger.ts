@@ -64,6 +64,9 @@ const REDACTED_PATHS = [
   'res.headers["set-cookie"]',
 ];
 
+/** What the rest of the system depends on, so only this module names the logging library. */
+export type StructuredLogger = Logger;
+
 /**
  * The destination is a parameter so that tests can assert on what is actually written. A redaction
  * rule that is never read back is a rule nobody knows is broken.

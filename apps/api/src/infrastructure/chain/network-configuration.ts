@@ -109,22 +109,49 @@ export const NETWORK_CONFIGURATIONS: Readonly<Record<NetworkIdentifier, NetworkC
       // A development chain publishes no finality tag, so the count is the only gate available.
       requiresFinalityTag: false,
       maximumReorgDepth: 8,
-      // Filled in by the test harness once it has deployed its token; a payment cannot be created
-      // against an asset that has not been deployed.
+      // Empty by construction. A development chain deploys a fresh token on every start, so its
+      // address is registered at boot through registerLocalDevelopmentAsset rather than frozen here.
       assetAllowlist: Object.freeze([]),
       assetDenylist: Object.freeze([]),
       explorerBaseUrl: '',
     }),
   });
 
+/**
+ * Assets deployed by a local development chain, registered at boot.
+ *
+ * Every other network's asset list is a frozen constant, because a token address that can be changed
+ * at runtime is a way to redirect what a payment credits. A development chain genuinely redeploys its
+ * token on every start, so there is nothing to freeze; the signature accepts no network argument, so
+ * this cannot become a way to add an asset to Polygon.
+ */
+const localDevelopmentAssets: AllowedAsset[] = [];
+
+export function registerLocalDevelopmentAsset(asset: AllowedAsset): void {
+  const reference = asset.reference.toLowerCase();
+  const registered = Object.freeze({ ...asset, reference });
+  const alreadyRegistered = localDevelopmentAssets.findIndex(
+    (entry) => entry.reference === reference,
+  );
+  if (alreadyRegistered === -1) {
+    localDevelopmentAssets.push(registered);
+    return;
+  }
+  localDevelopmentAssets[alreadyRegistered] = registered;
+}
+
 export function networkConfigurationFor(network: NetworkIdentifier): NetworkConfiguration {
-  return NETWORK_CONFIGURATIONS[network];
+  const configuration = NETWORK_CONFIGURATIONS[network];
+  if (network !== 'local-anvil') {
+    return configuration;
+  }
+  return { ...configuration, assetAllowlist: localDevelopmentAssets };
 }
 
 export function networksForEnvironment(environment: Environment): readonly NetworkConfiguration[] {
-  return Object.values(NETWORK_CONFIGURATIONS).filter(
-    (configuration) => configuration.environment === environment,
-  );
+  return Object.values(NETWORK_CONFIGURATIONS)
+    .filter((configuration) => configuration.environment === environment)
+    .map((configuration) => networkConfigurationFor(configuration.networkIdentifier));
 }
 
 export function findAllowedAsset(network: NetworkIdentifier, symbol: string): AllowedAsset | null {

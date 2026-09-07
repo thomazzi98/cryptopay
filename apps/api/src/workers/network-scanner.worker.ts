@@ -1,0 +1,233 @@
+import type { NetworkIdentifier } from '@cryptopay/shared';
+
+import type { ScanNetworkUseCase, ScanOutcome } from '../application/scan-network.use-case.js';
+import type { ChainGateway } from '../application/ports/chain-gateway.port.js';
+import type { BlockCursorRepository } from '../infrastructure/persistence/block-cursor.repository.js';
+import type {
+  Lease,
+  LeaderLeaseRepository,
+} from '../infrastructure/persistence/leader-lease.repository.js';
+import type { StructuredLogger } from '../observability/logger.js';
+
+/**
+ * The process that keeps one network scanned.
+ *
+ * Exactly one instance does the work at a time, decided by a lease rather than by a session advisory
+ * lock. An advisory lock has no failover when a process hangs but stays connected: scanning silently
+ * stops while readiness stays green, which is the worst shape a failure can take in a payment system.
+ * A lease expires whether or not the holder noticed it was stuck.
+ *
+ * The lease's fencing token travels into every write. A worker that hung past its expiry and woke up
+ * afterwards still believes it is the leader; its writes are rejected by the token comparison rather
+ * than by its own opinion of whether it is still in charge.
+ */
+
+export interface NetworkScannerOptions {
+  readonly leaseSeconds: number;
+  readonly pollIntervalMilliseconds: number;
+  /** Backoff after a tick that threw, so a failing endpoint is not hammered. */
+  readonly errorBackoffMilliseconds: number;
+  /** Where scanning starts when a network has never been watched before. */
+  readonly initialScanRange: number;
+}
+
+const DEFAULT_SCANNER_OPTIONS: NetworkScannerOptions = Object.freeze({
+  leaseSeconds: 30,
+  pollIntervalMilliseconds: 4000,
+  errorBackoffMilliseconds: 10_000,
+  initialScanRange: 20,
+});
+
+export interface NetworkScannerDependencies {
+  readonly gateway: ChainGateway;
+  readonly scanner: ScanNetworkUseCase;
+  readonly leaseRepository: LeaderLeaseRepository;
+  readonly blockCursorRepository: BlockCursorRepository;
+  readonly logger: StructuredLogger;
+  readonly holderIdentity: string;
+  readonly options?: NetworkScannerOptions;
+}
+
+export type TickOutcome =
+  { readonly kind: 'not_leader' } | { readonly kind: 'scanned'; readonly outcome: ScanOutcome };
+
+export class NetworkScannerWorker {
+  private readonly dependencies: NetworkScannerDependencies;
+  private readonly options: NetworkScannerOptions;
+  private readonly network: NetworkIdentifier;
+  private readonly leaseName: string;
+  private lease: Lease | null = null;
+  private running = false;
+  private wakeUp: (() => void) | null = null;
+
+  constructor(dependencies: NetworkScannerDependencies) {
+    this.dependencies = dependencies;
+    this.options = dependencies.options ?? DEFAULT_SCANNER_OPTIONS;
+    this.network = dependencies.gateway.networkIdentifier;
+    this.leaseName = `scanner:${this.network}`;
+  }
+
+  /**
+   * Confirms the endpoint is the chain it claims to be, and places the cursor if this network has
+   * never been watched. Starting at the tip rather than at genesis is deliberate: a payment cannot be
+   * created on a network with no cursor, so there is no earlier history that could contain money owed
+   * to anyone.
+   */
+  async prepare(): Promise<void> {
+    await this.dependencies.gateway.assertLedgerIdentity();
+    const progress = await this.dependencies.gateway.readChainProgress();
+    await this.dependencies.blockCursorRepository.initialiseIfAbsent(
+      this.network,
+      progress.tip.height,
+      progress.tip.reference,
+      this.options.initialScanRange,
+    );
+  }
+
+  /**
+   * One complete tick: hold the lease, stamp its token on the cursor, scan.
+   *
+   * Returning `not_leader` is the normal outcome for every instance but one, and is not an error.
+   */
+  async runOnce(): Promise<TickOutcome> {
+    const lease = await this.holdLease();
+    if (lease === null) {
+      return { kind: 'not_leader' };
+    }
+
+    const adopted = await this.dependencies.blockCursorRepository.adoptLease(
+      this.network,
+      lease.fencingToken,
+    );
+    if (!adopted) {
+      // A higher token is already on the cursor: another worker overtook this one between acquiring
+      // the lease and stamping it. Stopping now is cheaper than discovering it write by write.
+      this.lease = null;
+      return { kind: 'not_leader' };
+    }
+
+    const outcome = await this.dependencies.scanner.execute(lease.fencingToken);
+    this.reportOutcome(outcome);
+    if (outcome.kind === 'lease_lost') {
+      this.lease = null;
+    }
+    return { kind: 'scanned', outcome };
+  }
+
+  async start(): Promise<void> {
+    this.running = true;
+    for (;;) {
+      const delay = await this.tickAndChooseDelay();
+      await this.sleep(delay);
+      // Checked after the sleep rather than before the tick, so a shutdown that arrives mid-sleep
+      // ends the loop without spending one more tick on a network nobody is waiting for.
+      if (!this.shouldKeepRunning()) {
+        return;
+      }
+    }
+  }
+
+  /** Ends the loop and hands the lease back, so a peer takes over at once rather than after expiry. */
+  async stop(): Promise<void> {
+    this.running = false;
+    this.wakeUp?.();
+    const lease = this.lease;
+    this.lease = null;
+    if (lease !== null) {
+      await this.dependencies.leaseRepository.release(lease);
+    }
+  }
+
+  private shouldKeepRunning(): boolean {
+    return this.running;
+  }
+
+  private async tickAndChooseDelay(): Promise<number> {
+    try {
+      const tick = await this.runOnce();
+      if (tick.kind === 'scanned' && tick.outcome.kind === 'scanned') {
+        // More blocks are already waiting, so there is nothing to wait for.
+        return 0;
+      }
+      return this.options.pollIntervalMilliseconds;
+    } catch (error) {
+      this.dependencies.logger.error(
+        { error, network: this.network },
+        'The network scanner tick failed',
+      );
+      return this.options.errorBackoffMilliseconds;
+    }
+  }
+
+  private async holdLease(): Promise<Lease | null> {
+    const held = this.lease;
+    if (held !== null) {
+      const renewed = await this.dependencies.leaseRepository.renew(
+        held,
+        this.options.leaseSeconds,
+      );
+      this.lease = renewed;
+      return renewed;
+    }
+    const acquired = await this.dependencies.leaseRepository.acquire(
+      this.leaseName,
+      this.dependencies.holderIdentity,
+      this.options.leaseSeconds,
+    );
+    this.lease = acquired;
+    if (acquired !== null) {
+      this.dependencies.logger.info(
+        { network: this.network, fencingToken: acquired.fencingToken.toString() },
+        'The network scanner took the lease',
+      );
+    }
+    return acquired;
+  }
+
+  private reportOutcome(outcome: ScanOutcome): void {
+    const logger = this.dependencies.logger;
+    if (outcome.kind === 'halted') {
+      // Halting is a decision that needs a human, so it is logged at the level that pages one.
+      logger.error({ network: this.network, reason: outcome.reason }, 'Scanning is halted');
+      return;
+    }
+    if (outcome.kind === 'rewound') {
+      logger.warn(
+        {
+          network: this.network,
+          forkHeight: outcome.forkHeight.toString(),
+          orphanedTransfers: outcome.orphanedTransfers,
+        },
+        'A fork was resolved and observations above it were withdrawn',
+      );
+      return;
+    }
+    if (outcome.kind === 'scanned' && outcome.transfersObserved > 0) {
+      logger.info(
+        {
+          network: this.network,
+          fromHeight: outcome.fromHeight.toString(),
+          toHeight: outcome.toHeight.toString(),
+          transfersObserved: outcome.transfersObserved,
+        },
+        'Transfers were observed',
+      );
+    }
+  }
+
+  /** Interruptible, so a shutdown does not wait out a full poll interval. */
+  private sleep(milliseconds: number): Promise<void> {
+    if (milliseconds === 0) {
+      return Promise.resolve();
+    }
+    return new Promise((resolve) => {
+      const timer = setTimeout(finish, milliseconds);
+      this.wakeUp = finish;
+
+      function finish(): void {
+        clearTimeout(timer);
+        resolve();
+      }
+    });
+  }
+}

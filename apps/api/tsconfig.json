@@ -4,8 +4,12 @@
     "composite": false,
     "declaration": false,
     "declarationMap": false,
-    "noEmit": true
+    "noEmit": true,
+    // Wider than the build's rootDir on purpose: the tests are typechecked here but never emitted,
+    // so a spec that no longer compiles against the code it exercises fails the build rather than
+    // failing at runtime, months later, as a confusing NaN.
+    "rootDir": "."
   },
-  "include": ["src/**/*.ts"],
+  "include": ["src/**/*.ts", "test/**/*.ts"],
   "exclude": []
 }

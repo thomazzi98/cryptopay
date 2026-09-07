@@ -14,6 +14,7 @@ import {
   NETWORK_CONFIGURATIONS,
   networkConfigurationFor,
   networksForEnvironment,
+  registerLocalDevelopmentAsset,
 } from './network-configuration.js';
 
 const ALL_NETWORKS = Object.keys(NETWORK_CONFIGURATIONS) as NetworkIdentifier[];
@@ -90,6 +91,36 @@ describe('asset resolution', () => {
 
   it('settles nothing on the local chain until a token is deployed', () => {
     expect(findAllowedAsset('local-anvil', 'USDC')).toBeNull();
+  });
+});
+
+/**
+ * A development chain redeploys its token on every start, so its address is registered at boot
+ * rather than frozen. The property that matters is that this cannot reach any other network: a token
+ * address settable at runtime on Polygon would be a way to redirect what a payment credits.
+ */
+describe('registering a local development asset', () => {
+  const LOCAL_TOKEN = '0x5fbdb2315678afecb367f032d93f642f64180aa3';
+
+  it('makes the token creditable on the local chain', () => {
+    registerLocalDevelopmentAsset({ reference: LOCAL_TOKEN, symbol: 'MUSD', decimals: 6 });
+    expect(isAllowedAssetReference('local-anvil', LOCAL_TOKEN)).toBe(true);
+  });
+
+  it('registers the same token once however often it is announced', () => {
+    registerLocalDevelopmentAsset({ reference: LOCAL_TOKEN, symbol: 'MUSD', decimals: 6 });
+    registerLocalDevelopmentAsset({ reference: LOCAL_TOKEN, symbol: 'MUSD', decimals: 6 });
+    expect(
+      networkConfigurationFor('local-anvil').assetAllowlist.filter(
+        (asset) => asset.reference === LOCAL_TOKEN,
+      ),
+    ).toHaveLength(1);
+  });
+
+  it('cannot add an asset to a real network', () => {
+    registerLocalDevelopmentAsset({ reference: LOCAL_TOKEN, symbol: 'MUSD', decimals: 6 });
+    expect(isAllowedAssetReference('polygon-mainnet', LOCAL_TOKEN)).toBe(false);
+    expect(isAllowedAssetReference('polygon-amoy', LOCAL_TOKEN)).toBe(false);
   });
 
   /**

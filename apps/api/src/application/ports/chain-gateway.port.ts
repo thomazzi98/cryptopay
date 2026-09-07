@@ -58,11 +58,19 @@ export interface TransferScanRequest {
   readonly toHeight: bigint;
   readonly watchedAccounts: readonly string[];
   readonly assetReferences: readonly string[];
+  /**
+   * How many trailing headers of the window the caller needs, counted back from `toHeight`.
+   *
+   * Fork resolution walks a stored header chain, so the chain must not have gaps inside the depth a
+   * reorg can reach. It may have gaps beyond it, and catching up across a million idle blocks would
+   * otherwise cost a request per block for headers nothing will ever consult.
+   */
+  readonly headerDepth: number;
 }
 
 export interface TransferScanResult {
   readonly scannedThrough: LedgerHeader;
-  /** Every header in the scanned range, which is what makes fork resolution possible later. */
+  /** The trailing headers of the scanned range, which is what makes fork resolution possible later. */
   readonly headers: readonly LedgerHeader[];
   readonly transfers: readonly ObservedTransfer[];
 }

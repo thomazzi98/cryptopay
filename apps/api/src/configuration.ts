@@ -1,3 +1,4 @@
+import type { NetworkIdentifier } from '@cryptopay/shared';
 import { z } from 'zod';
 
 /**
@@ -59,6 +60,37 @@ const ConfigurationSchema = z
       }),
 
     /**
+     * RPC endpoints per network, in preference order. A network with no endpoint is simply not
+     * watched, which is why payment creation refuses a network that has no cursor: accepting money on
+     * a chain nothing is scanning would leave the customer's transfer unobserved indefinitely.
+     *
+     * More than one endpoint buys two things. The first is a fallback transport that moves on when an
+     * endpoint is rate limited or lying about being healthy. The second is the finality quorum: the
+     * endpoints after the first second the finality opinion, and a payment requiring the finality tag
+     * cannot complete without one of them agreeing.
+     */
+    polygonMainnetRpcUrls: z.array(z.url()).max(8).default([]),
+    polygonAmoyRpcUrls: z.array(z.url()).max(8).default([]),
+    localAnvilRpcUrls: z.array(z.url()).max(8).default([]),
+
+    /**
+     * The token a local development chain deployed. Every other network's asset list is a frozen
+     * constant, because a token address that can be set at runtime is a way to redirect what a
+     * payment credits; a development chain genuinely redeploys on every start.
+     */
+    localAnvilUsdcAddress: z
+      .string()
+      .regex(/^0x[\da-f]{40}$/, 'Expected a lowercase 0x-prefixed address')
+      .optional(),
+
+    scannerPollIntervalMilliseconds: z.coerce.number().int().min(100).max(60_000).default(4000),
+    /**
+     * How long a scanner lease survives without renewal. Long enough that an ordinary pause does not
+     * cause a handover, short enough that a wedged process is replaced before a customer notices.
+     */
+    scannerLeaseSeconds: z.coerce.number().int().min(5).max(300).default(30),
+
+    /**
      * Explicit `host:port` destinations that bypass only the private-address check when delivering a
      * callback, so the bundled demo receiver can be reached during development.
      *
@@ -111,6 +143,12 @@ export function loadConfiguration(source: EnvironmentSource): Configuration {
     apiKeyPepper: source.API_KEY_PEPPER,
     publicCheckoutBaseUrl: source.PUBLIC_CHECKOUT_BASE_URL,
     walletKeyEncryptionKey: source.WALLET_KEY_ENCRYPTION_KEY,
+    polygonMainnetRpcUrls: parseCommaSeparated(source.POLYGON_MAINNET_RPC_URLS),
+    polygonAmoyRpcUrls: parseCommaSeparated(source.POLYGON_AMOY_RPC_URLS),
+    localAnvilRpcUrls: parseCommaSeparated(source.LOCAL_ANVIL_RPC_URLS),
+    localAnvilUsdcAddress: source.LOCAL_ANVIL_USDC_ADDRESS,
+    scannerPollIntervalMilliseconds: source.SCANNER_POLL_INTERVAL_MILLISECONDS,
+    scannerLeaseSeconds: source.SCANNER_LEASE_SECONDS,
     callbackPrivateDestinationAllowlist: parseCommaSeparated(
       source.CALLBACK_PRIVATE_DESTINATION_ALLOWLIST,
     ),
@@ -124,6 +162,22 @@ export function loadConfiguration(source: EnvironmentSource): Configuration {
   }
 
   return Object.freeze(result.data);
+}
+
+/**
+ * The endpoints configured for each network, and nothing about which are healthy. A network with an
+ * empty list is not watched at all.
+ */
+export function rpcUrlsFor(
+  configuration: Configuration,
+  network: NetworkIdentifier,
+): readonly string[] {
+  const byNetwork: Record<NetworkIdentifier, readonly string[]> = {
+    'polygon-mainnet': configuration.polygonMainnetRpcUrls,
+    'polygon-amoy': configuration.polygonAmoyRpcUrls,
+    'local-anvil': configuration.localAnvilRpcUrls,
+  };
+  return byNetwork[network];
 }
 
 /** Whether callbacks may currently reach an allowlisted private destination at all. */

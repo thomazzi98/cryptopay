@@ -193,6 +193,7 @@ describe('scanning incoming transfers', () => {
       toHeight: sent.blockNumber,
       watchedAccounts: [RECEIVING_ACCOUNT],
       assetReferences: [tokenAddress],
+      headerDepth: 8,
     });
 
     expect(result.transfers).toHaveLength(1);
@@ -217,6 +218,7 @@ describe('scanning incoming transfers', () => {
       toHeight: sent.blockNumber,
       watchedAccounts: [RECEIVING_ACCOUNT],
       assetReferences: [tokenAddress],
+      headerDepth: 8,
     });
 
     expect(result.transfers[0]?.amountInBaseUnits).toBe(1_234_567n);
@@ -231,6 +233,7 @@ describe('scanning incoming transfers', () => {
       toHeight: sent.blockNumber,
       watchedAccounts: [RECEIVING_ACCOUNT],
       assetReferences: [tokenAddress],
+      headerDepth: 8,
     });
 
     expect(result.transfers).toHaveLength(0);
@@ -250,6 +253,7 @@ describe('scanning incoming transfers', () => {
       toHeight: sent.blockNumber,
       watchedAccounts: [RECEIVING_ACCOUNT],
       assetReferences: [decoyAddress],
+      headerDepth: 8,
     });
 
     expect(result.transfers).toHaveLength(0);
@@ -265,6 +269,7 @@ describe('scanning incoming transfers', () => {
       toHeight: last.blockNumber,
       watchedAccounts: [RECEIVING_ACCOUNT, OTHER_ACCOUNT],
       assetReferences: [tokenAddress],
+      headerDepth: 8,
     });
 
     expect(result.transfers).toHaveLength(2);
@@ -281,6 +286,7 @@ describe('scanning incoming transfers', () => {
       toHeight: after.tip.height,
       watchedAccounts: [RECEIVING_ACCOUNT],
       assetReferences: [tokenAddress],
+      headerDepth: 8,
     });
 
     expect(result.headers).toHaveLength(2);
@@ -294,6 +300,7 @@ describe('scanning incoming transfers', () => {
       toHeight: progress.tip.height,
       watchedAccounts: [],
       assetReferences: [tokenAddress],
+      headerDepth: 8,
     });
     expect(result.transfers).toHaveLength(0);
   });

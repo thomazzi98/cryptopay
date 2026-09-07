@@ -167,17 +167,23 @@ export class EvmChainGateway implements ChainGateway {
   }
 
   async scanIncomingTransfers(request: TransferScanRequest): Promise<TransferScanResult> {
-    if (request.watchedAccounts.length === 0 || request.assetReferences.length === 0) {
-      const scannedThrough = await this.readHeaderOrThrow(request.toHeight);
-      return { scannedThrough, headers: [], transfers: [] };
-    }
-
     const transfers: ObservedTransfer[] = [];
-    for (const accounts of chunk(request.watchedAccounts, MAXIMUM_ACCOUNTS_PER_QUERY)) {
-      transfers.push(...(await this.scanChunk(request, accounts)));
+    // No watched account means no query at all: an empty `args.to` array matches every transfer on
+    // the contract, which would pull the token's entire traffic back over the wire.
+    if (request.watchedAccounts.length > 0 && request.assetReferences.length > 0) {
+      for (const accounts of chunk(request.watchedAccounts, MAXIMUM_ACCOUNTS_PER_QUERY)) {
+        transfers.push(...(await this.scanChunk(request, accounts)));
+      }
     }
 
-    const headers = await this.readHeaders(request.fromHeight, request.toHeight);
+    // Headers are read even when nothing was watched, because the chain fork resolution walks has to
+    // stay unbroken across quiet windows. Only the trailing depth is read; heights below it are
+    // beyond anything a reorg walk consults.
+    const headerFrom = maximum(
+      request.fromHeight,
+      request.toHeight - BigInt(request.headerDepth - 1),
+    );
+    const headers = await this.readHeaders(headerFrom, request.toHeight);
     const scannedThrough = headers.at(-1) ?? (await this.readHeaderOrThrow(request.toHeight));
     return { scannedThrough, headers, transfers };
   }
@@ -301,6 +307,14 @@ export class EvmChainGateway implements ChainGateway {
   async readNativeBalance(account: string): Promise<bigint> {
     return this.client.getBalance({ address: getAddress(account) });
   }
+}
+
+function maximum(left: bigint, right: bigint): bigint {
+  // Math.max throws on bigints rather than comparing them.
+  if (left > right) {
+    return left;
+  }
+  return right;
 }
 
 function chunk<T>(items: readonly T[], size: number): T[][] {

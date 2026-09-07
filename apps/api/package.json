@@ -8,6 +8,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "start": "node --env-file-if-exists=../../.env dist/main.api.js",
     "dev": "node --env-file-if-exists=../../.env --watch src/main.api.ts",
+    "start:chain-worker": "node --env-file-if-exists=../../.env dist/main.chain-worker.js",
+    "dev:chain-worker": "node --env-file-if-exists=../../.env --watch src/main.chain-worker.ts",
     "db:migrate": "node --env-file-if-exists=../../.env dist/infrastructure/persistence/migrate-cli.js",
     "wallet:provision": "node --env-file-if-exists=../../.env dist/infrastructure/wallet/provision-seed-cli.js"
   },

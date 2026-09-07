@@ -246,6 +246,47 @@ export class PaymentRepository {
     return toPayment(row);
   }
 
+  /**
+   * The addresses the scanner filters chain logs by.
+   *
+   * Terminal payments stay watched for a grace period so a transfer that arrives after expiry is
+   * still recorded. It will be classified `late` and will not move the payment, but a customer whose
+   * money arrived four minutes too late needs it to be visible and recoverable rather than invisible.
+   */
+  async findWatchedAccounts(
+    network: NetworkIdentifier,
+    terminalGraceSeconds: number,
+  ): Promise<readonly string[]> {
+    const result = await this.pool.query<{ receiving_account: string }>(
+      `SELECT DISTINCT receiving_account FROM payments
+        WHERE network_identifier = $1::network_identifier
+          AND (status IN ('pending', 'partially_funded', 'confirming')
+               OR updated_at > now() - make_interval(secs => $2))`,
+      [network, terminalGraceSeconds],
+    );
+    return result.rows.map((row) => row.receiving_account);
+  }
+
+  /**
+   * Resolves observed transfers back to the payments they were sent to. A payment address is unique
+   * per network by constraint, so this mapping is one to one and cannot silently credit the wrong
+   * payment.
+   */
+  async findByReceivingAccounts(
+    network: NetworkIdentifier,
+    accounts: readonly string[],
+  ): Promise<readonly Payment[]> {
+    if (accounts.length === 0) {
+      return [];
+    }
+    const result = await this.pool.query<PaymentRow>(
+      `SELECT ${PAYMENT_COLUMNS} FROM payments
+        WHERE network_identifier = $1::network_identifier AND receiving_account = ANY($2::text[])`,
+      [network, [...accounts]],
+    );
+    return result.rows.map((row) => toPayment(row));
+  }
+
   async list(filter: PaymentListFilter): Promise<PaymentPage> {
     const conditions = ['merchant_id = $1', 'environment = $2::environment_name'];
     const values: unknown[] = [filter.merchantId, filter.environment];
