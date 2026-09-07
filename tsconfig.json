@@ -7,6 +7,9 @@
     },
     {
       "path": "./apps/api/tsconfig.build.json"
+    },
+    {
+      "path": "./apps/demo-receiver/tsconfig.build.json"
     }
   ]
 }

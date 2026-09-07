@@ -1,0 +1,172 @@
+# The local environment: `docker compose up` reaches a working demo with nothing else to do.
+#
+# The layout is the deployment topology rather than a convenience. Three processes, three database
+# roles, and two networks, because the containment those give is the whole point: the callback
+# worker is the only thing here that makes outbound requests to addresses a stranger chose, and it
+# is arranged so that compromising it reaches as little as possible.
+
+name: cryptopay
+
+services:
+  postgres:
+    image: postgres:18.4-bookworm
+    environment:
+      POSTGRES_USER: cryptopay
+      POSTGRES_PASSWORD: cryptopay_local
+      POSTGRES_DB: cryptopay
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      # Roles are provisioned by the image's own init hook, so nobody has to remember a manual step
+      # and the demo cannot come up with every process sharing one superuser.
+      - ./docker/roles.sql:/docker-entrypoint-initdb.d/10-roles.sql:ro
+    networks: [internal]
+    healthcheck:
+      # pg_isready, never a sleep. A fixed wait is either too short on a slow machine or wasted time
+      # on a fast one, and it fails intermittently in exactly the way that is hardest to diagnose.
+      test: ['CMD-SHELL', 'pg_isready -U cryptopay -d cryptopay']
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+
+  migrate:
+    build:
+      context: .
+      dockerfile: docker/api.Dockerfile
+    command: ['node', 'apps/api/dist/infrastructure/persistence/migrate-cli.js']
+    environment:
+      DATABASE_URL: postgresql://cryptopay:cryptopay_local@postgres:5432/cryptopay
+      NODE_ENV: production
+      API_KEY_PEPPER: ${API_KEY_PEPPER:?set API_KEY_PEPPER in .env before starting}
+      WALLET_KEY_ENCRYPTION_KEY: ${WALLET_KEY_ENCRYPTION_KEY:?set WALLET_KEY_ENCRYPTION_KEY in .env}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [internal]
+    restart: 'no'
+
+  api:
+    build:
+      context: .
+      dockerfile: docker/api.Dockerfile
+    command: ['node', 'apps/api/dist/main.api.js']
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: 3001
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      DATABASE_URL: postgresql://cryptopay_api:cryptopay_api_local@postgres:5432/cryptopay
+      API_KEY_PEPPER: ${API_KEY_PEPPER:?}
+      WALLET_KEY_ENCRYPTION_KEY: ${WALLET_KEY_ENCRYPTION_KEY:?}
+      PUBLIC_CHECKOUT_BASE_URL: ${PUBLIC_CHECKOUT_BASE_URL:-http://localhost:3000/pay}
+      POLYGON_AMOY_RPC_URLS: ${POLYGON_AMOY_RPC_URLS:-}
+      POLYGON_MAINNET_RPC_URLS: ${POLYGON_MAINNET_RPC_URLS:-}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    ports:
+      - '3001:3001'
+    networks: [internal]
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:3001/healthz').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+
+  chain-worker:
+    build:
+      context: .
+      dockerfile: docker/api.Dockerfile
+    command: ['node', 'apps/api/dist/main.chain-worker.js']
+    environment:
+      NODE_ENV: production
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      DATABASE_URL: postgresql://cryptopay_chain_worker:cryptopay_chain_local@postgres:5432/cryptopay
+      API_KEY_PEPPER: ${API_KEY_PEPPER:?}
+      WALLET_KEY_ENCRYPTION_KEY: ${WALLET_KEY_ENCRYPTION_KEY:?}
+      POLYGON_AMOY_RPC_URLS: ${POLYGON_AMOY_RPC_URLS:-}
+      POLYGON_MAINNET_RPC_URLS: ${POLYGON_MAINNET_RPC_URLS:-}
+      SCANNER_POLL_INTERVAL_MILLISECONDS: ${SCANNER_POLL_INTERVAL_MILLISECONDS:-4000}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    # Separate from the API so that an HTTP flood cannot starve detection, and so detection keeps
+    # running while the API is being redeployed. A customer whose money has already left their wallet
+    # cannot be told to come back later.
+    networks: [internal]
+    restart: unless-stopped
+
+  callback-worker:
+    build:
+      context: .
+      dockerfile: docker/api.Dockerfile
+    command: ['node', 'apps/api/dist/main.callback-worker.js']
+    environment:
+      NODE_ENV: ${CALLBACK_WORKER_NODE_ENV:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      DATABASE_URL: postgresql://cryptopay_callback_worker:cryptopay_callback_local@postgres:5432/cryptopay
+      API_KEY_PEPPER: ${API_KEY_PEPPER:?}
+      WALLET_KEY_ENCRYPTION_KEY: ${WALLET_KEY_ENCRYPTION_KEY:?}
+      # The bundled receiver, reachable only because it is named here explicitly. There is no boolean
+      # that opens private addresses generally, and the API refuses to start with this list set while
+      # NODE_ENV is production.
+      CALLBACK_PRIVATE_DESTINATION_ALLOWLIST: ${CALLBACK_PRIVATE_DESTINATION_ALLOWLIST:-demo-receiver:8080}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    # The only service reachable from the network the demo receiver sits on. It is also the only one
+    # that connects to addresses a stranger chose, which is why it holds the narrowest database role
+    # of the three: compromising it yields the outbox and the signing secrets, and refuses on
+    # payments, api_keys and wallet_seeds.
+    networks: [internal, outbound]
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      dockerfile: docker/web.Dockerfile
+    environment:
+      NODE_ENV: production
+      CRYPTOPAY_API_URL: http://api:3001
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - '3000:3000'
+    networks: [internal]
+    restart: unless-stopped
+
+  # A merchant endpoint that verifies signatures with the same module the API signs with, so the
+  # demo proves interoperability rather than asserting it.
+  demo-receiver:
+    build:
+      context: .
+      dockerfile: docker/receiver.Dockerfile
+    environment:
+      NODE_ENV: production
+      PORT: 8080
+    networks: [outbound]
+    restart: unless-stopped
+
+networks:
+  # Both are ordinary bridge networks, so both have internet egress: the chain worker needs it to
+  # reach an RPC endpoint, and marking this one `internal: true` would stop detection entirely.
+  #
+  # The separation here is therefore about reachability between services, not about egress. The demo
+  # receiver cannot see the database or the API; only the callback worker can see the receiver. The
+  # control that actually limits where the callback worker connects is the destination policy in the
+  # application, and the control that limits what a compromise reaches is the database role.
+  internal:
+    driver: bridge
+  outbound:
+    driver: bridge
+
+volumes:
+  postgres-data:
