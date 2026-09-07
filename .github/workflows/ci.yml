@@ -26,6 +26,8 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
       - run: npm ci
+      # Runs before anything else: a leaked credential is the one mistake a revert cannot undo.
+      - run: npm run scan:secrets
       # The documentation generator reads the compiled transition table, so the build comes first.
       - run: npm run build
       - run: npm run lint
@@ -33,6 +35,19 @@ jobs:
       - run: npm run typecheck
       - run: npm run knip
       - run: npm run docs:check
+
+  secrets:
+    name: Secret scanning
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # gitleaks inspects history, not just the checked-out tree, so a secret committed and
+          # later removed is still found.
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@44c470ffc35caa8b1eb3e8012ca53c2f9bea4eb5 # v2.3.9
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   integration:
     name: Integration tests

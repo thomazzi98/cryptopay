@@ -42,6 +42,8 @@ function redactBinary(value: unknown): unknown {
 
 const REDACTED_PATHS = [
   'privateKey',
+  'testnetPrivateKey',
+  'amoyTestnetPrivateKey',
   'mnemonic',
   'masterSeed',
   'seed',

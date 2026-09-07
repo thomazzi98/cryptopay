@@ -132,6 +132,40 @@ describe('the callback private destination allowlist', () => {
   });
 });
 
+/**
+ * The testnet signing key belongs to a standalone validation script, not to the service. Keeping it
+ * out of the parsed configuration means no configuration dump, no error report and no debug log can
+ * contain it, whatever else goes wrong.
+ */
+describe('secrets the running service never loads', () => {
+  const PLANTED = 'planted-value-that-must-never-reach-the-configuration-object';
+
+  it('ignores the testnet private key even when it is present in the environment', () => {
+    const configuration = loadConfiguration({
+      ...REQUIRED,
+      AMOY_TESTNET_PRIVATE_KEY: PLANTED,
+    });
+    expect(JSON.stringify(configuration)).not.toContain(PLANTED);
+  });
+
+  it('ignores the testnet receiving address too', () => {
+    const configuration = loadConfiguration({
+      ...REQUIRED,
+      AMOY_TESTNET_WALLET_ADDRESS_THAT_WILL_RECEIVE_MONEY: PLANTED,
+    });
+    expect(JSON.stringify(configuration)).not.toContain(PLANTED);
+  });
+
+  it('declares no field whose name suggests signing material', () => {
+    const fields = Object.keys(loadConfiguration(environment()));
+    for (const field of fields) {
+      expect(field.toLowerCase()).not.toContain('privatekey');
+      expect(field.toLowerCase()).not.toContain('mnemonic');
+      expect(field.toLowerCase()).not.toContain('seed');
+    }
+  });
+});
+
 describe('callbackSsrfPolicy', () => {
   it('reports strict when nothing is allowlisted', () => {
     expect(callbackSsrfPolicy(load())).toBe('strict');
