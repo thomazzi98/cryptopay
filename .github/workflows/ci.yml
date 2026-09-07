@@ -58,10 +58,15 @@ jobs:
         with:
           node-version-file: .nvmrc
           cache: npm
+      - uses: foundry-rs/foundry-toolchain@908c540300062bd5a7e473851cdb4282204cee09 # v1.9.1
+        with:
+          # Pinned rather than 'stable': someone else's release must not be able to break this
+          # pipeline on a morning nobody changed anything.
+          version: v1.8.1
       - run: npm ci
       - run: npm run build
-      # PostgreSQL is started by the suite itself as a native binary, so there is no service
-      # container to wait on and the same command runs identically on a developer machine.
+      # PostgreSQL and Anvil are both started by the suite itself as native binaries, so there is no
+      # service container to wait on and the same command runs identically on a developer machine.
       - run: npm run test:integration
 
   unit:

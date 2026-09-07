@@ -90,7 +90,6 @@ const BANNED_IDENTIFIERS = [
   'ctrl',
   'dto',
   'param',
-  'params',
   'gen',
   'init',
   'auth',
@@ -190,6 +189,8 @@ const ALLOWED_SHORT_NAMES = [
   'genReqId',
   'authTagLength',
   'Params',
+  // JSON-RPC wire field names, fixed by the protocol.
+  'params',
 ];
 
 const INFRASTRUCTURE_ONLY_PACKAGES = [
@@ -323,6 +324,10 @@ export default typescriptEslint.config(
       'unicorn/consistent-boolean-name': 'off',
       // Named imports document what is used; a default namespace import hides it.
       'unicorn/import-style': 'off',
+      // Prefers every private member before every public one. This codebase orders members
+      // narratively instead: the public surface first, the helpers it delegates to underneath,
+      // which is the order a reviewer reads them in.
+      'unicorn/consistent-class-member-order': 'off',
     },
   },
 

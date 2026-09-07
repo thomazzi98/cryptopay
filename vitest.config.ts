@@ -28,6 +28,7 @@ export default defineConfig({
           // project root) and to tooling that reads this file from the repository root.
           globalSetup: [
             resolve(import.meta.dirname, 'apps/api/test/setup/postgres.global-setup.ts'),
+            resolve(import.meta.dirname, 'apps/api/test/setup/anvil.global-setup.ts'),
           ],
           // Starting a real PostgreSQL server and applying migrations happens once for the project;
           // each spec then clones the migrated template, which is a file copy.
