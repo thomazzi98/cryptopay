@@ -83,6 +83,27 @@ export function assessFinality(
 }
 
 /**
+ * Whether a second provider is worth asking.
+ *
+ * Both local gates must already pass, so the extra request costs roughly one per completed payment
+ * rather than one per poll. Asking on every tick would multiply the request budget by the polling
+ * rate for an answer that cannot change the outcome until the local gates open.
+ */
+export function needsSecondOpinion(payment: Payment, progress: ChainProgress): boolean {
+  const height = payment.settlingBlockHeight;
+  if (height === null || !payment.requiresFinalityTag) {
+    return false;
+  }
+  if (confirmationsFor(payment, progress.tip.height) < payment.requiredConfirmations) {
+    return false;
+  }
+  if (progress.finalizedHeight === null) {
+    return false;
+  }
+  return progress.finalizedHeight >= height;
+}
+
+/**
  * Whether the chain's finality view has stalled. A count cannot detect this: blocks keep arriving
  * while nothing finalizes, so confirmations climb and a count-only gate would complete payments the
  * chain has not actually settled. The answer to a stall is to alert and hold, never to fall back.

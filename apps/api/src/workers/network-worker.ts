@@ -1,5 +1,9 @@
 import type { NetworkIdentifier } from '@cryptopay/shared';
 
+import type {
+  EvaluatePaymentsUseCase,
+  EvaluationOutcome,
+} from '../application/evaluate-payments.use-case.js';
 import type { ScanNetworkUseCase, ScanOutcome } from '../application/scan-network.use-case.js';
 import type { ChainGateway } from '../application/ports/chain-gateway.port.js';
 import type { BlockCursorRepository } from '../infrastructure/persistence/block-cursor.repository.js';
@@ -10,7 +14,15 @@ import type {
 import type { StructuredLogger } from '../observability/logger.js';
 
 /**
- * The process that keeps one network scanned.
+ * The process that keeps one network scanned and its payments evaluated.
+ *
+ * Both halves run under one lease and in one order: observe first, decide second. Nothing is ever
+ * credited on the strength of an evaluation that ran against a window the scanner had not committed.
+ *
+ * Evaluation does not actually need the lease. Its safety comes from claiming with SKIP LOCKED and
+ * from the compare-and-swap on every payment, both of which hold with any number of workers, and a
+ * test drives two evaluators concurrently to show it. Running it under the lease anyway keeps one
+ * process asking the chain how far it has advanced rather than all of them.
  *
  * Exactly one instance does the work at a time, decided by a lease rather than by a session advisory
  * lock. An advisory lock has no failover when a process hangs but stays connected: scanning silently
@@ -22,7 +34,7 @@ import type { StructuredLogger } from '../observability/logger.js';
  * than by its own opinion of whether it is still in charge.
  */
 
-export interface NetworkScannerOptions {
+export interface NetworkWorkerOptions {
   readonly leaseSeconds: number;
   readonly pollIntervalMilliseconds: number;
   /** Backoff after a tick that threw, so a failing endpoint is not hammered. */
@@ -31,38 +43,44 @@ export interface NetworkScannerOptions {
   readonly initialScanRange: number;
 }
 
-const DEFAULT_SCANNER_OPTIONS: NetworkScannerOptions = Object.freeze({
+const DEFAULT_WORKER_OPTIONS: NetworkWorkerOptions = Object.freeze({
   leaseSeconds: 30,
   pollIntervalMilliseconds: 4000,
   errorBackoffMilliseconds: 10_000,
   initialScanRange: 20,
 });
 
-export interface NetworkScannerDependencies {
+export interface NetworkWorkerDependencies {
   readonly gateway: ChainGateway;
   readonly scanner: ScanNetworkUseCase;
+  readonly evaluator: EvaluatePaymentsUseCase;
   readonly leaseRepository: LeaderLeaseRepository;
   readonly blockCursorRepository: BlockCursorRepository;
   readonly logger: StructuredLogger;
   readonly holderIdentity: string;
-  readonly options?: NetworkScannerOptions;
+  readonly options?: NetworkWorkerOptions;
 }
 
 export type TickOutcome =
-  { readonly kind: 'not_leader' } | { readonly kind: 'scanned'; readonly outcome: ScanOutcome };
+  | { readonly kind: 'not_leader' }
+  | {
+      readonly kind: 'worked';
+      readonly scan: ScanOutcome;
+      readonly evaluation: EvaluationOutcome | null;
+    };
 
-export class NetworkScannerWorker {
-  private readonly dependencies: NetworkScannerDependencies;
-  private readonly options: NetworkScannerOptions;
+export class NetworkWorker {
+  private readonly dependencies: NetworkWorkerDependencies;
+  private readonly options: NetworkWorkerOptions;
   private readonly network: NetworkIdentifier;
   private readonly leaseName: string;
   private lease: Lease | null = null;
   private running = false;
   private wakeUp: (() => void) | null = null;
 
-  constructor(dependencies: NetworkScannerDependencies) {
+  constructor(dependencies: NetworkWorkerDependencies) {
     this.dependencies = dependencies;
-    this.options = dependencies.options ?? DEFAULT_SCANNER_OPTIONS;
+    this.options = dependencies.options ?? DEFAULT_WORKER_OPTIONS;
     this.network = dependencies.gateway.networkIdentifier;
     this.leaseName = `scanner:${this.network}`;
   }
@@ -106,12 +124,21 @@ export class NetworkScannerWorker {
       return { kind: 'not_leader' };
     }
 
-    const outcome = await this.dependencies.scanner.execute(lease.fencingToken);
-    this.reportOutcome(outcome);
-    if (outcome.kind === 'lease_lost') {
+    const scan = await this.dependencies.scanner.execute(lease.fencingToken);
+    this.reportScan(scan);
+    if (scan.kind === 'lease_lost') {
       this.lease = null;
+      return { kind: 'worked', scan, evaluation: null };
     }
-    return { kind: 'scanned', outcome };
+    // A halted network is halted for both halves. Evaluating against observations that may sit on a
+    // fork nobody could resolve is exactly the guess the halt exists to prevent.
+    if (scan.kind === 'halted') {
+      return { kind: 'worked', scan, evaluation: null };
+    }
+
+    const evaluation = await this.dependencies.evaluator.execute();
+    this.reportEvaluation(evaluation);
+    return { kind: 'worked', scan, evaluation };
   }
 
   async start(): Promise<void> {
@@ -145,16 +172,13 @@ export class NetworkScannerWorker {
   private async tickAndChooseDelay(): Promise<number> {
     try {
       const tick = await this.runOnce();
-      if (tick.kind === 'scanned' && tick.outcome.kind === 'scanned') {
+      if (tick.kind === 'worked' && tick.scan.kind === 'scanned') {
         // More blocks are already waiting, so there is nothing to wait for.
         return 0;
       }
       return this.options.pollIntervalMilliseconds;
     } catch (error) {
-      this.dependencies.logger.error(
-        { error, network: this.network },
-        'The network scanner tick failed',
-      );
+      this.dependencies.logger.error({ error, network: this.network }, 'The network tick failed');
       return this.options.errorBackoffMilliseconds;
     }
   }
@@ -178,13 +202,28 @@ export class NetworkScannerWorker {
     if (acquired !== null) {
       this.dependencies.logger.info(
         { network: this.network, fencingToken: acquired.fencingToken.toString() },
-        'The network scanner took the lease',
+        'The network worker took the lease',
       );
     }
     return acquired;
   }
 
-  private reportOutcome(outcome: ScanOutcome): void {
+  private reportEvaluation(evaluation: EvaluationOutcome): void {
+    if (evaluation.transitioned === 0) {
+      return;
+    }
+    this.dependencies.logger.info(
+      {
+        network: this.network,
+        transitioned: evaluation.transitioned,
+        contended: evaluation.contended,
+        secondOpinionsRequested: evaluation.secondOpinionsRequested,
+      },
+      'Payments changed status',
+    );
+  }
+
+  private reportScan(outcome: ScanOutcome): void {
     const logger = this.dependencies.logger;
     if (outcome.kind === 'halted') {
       // Halting is a decision that needs a human, so it is logged at the level that pages one.

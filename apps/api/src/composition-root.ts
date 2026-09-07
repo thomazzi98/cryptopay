@@ -4,6 +4,7 @@ import type { Pool } from 'pg';
 
 import { CancelPaymentUseCase } from './application/cancel-payment.use-case.js';
 import { CreatePaymentUseCase } from './application/create-payment.use-case.js';
+import { EvaluatePaymentsUseCase } from './application/evaluate-payments.use-case.js';
 import { ScanNetworkUseCase } from './application/scan-network.use-case.js';
 import { type Configuration, loadConfiguration, rpcUrlsFor } from './configuration.js';
 import { buildServer } from './http/build-server.js';
@@ -16,6 +17,7 @@ import {
 import { BlockCursorRepository } from './infrastructure/persistence/block-cursor.repository.js';
 import { ChainScanStore } from './infrastructure/persistence/chain-scan.store.js';
 import { createDatabasePool } from './infrastructure/persistence/database.js';
+import { EvaluationQueueRepository } from './infrastructure/persistence/evaluation-queue.repository.js';
 import { IdempotencyRepository } from './infrastructure/persistence/idempotency.repository.js';
 import { LeaderLeaseRepository } from './infrastructure/persistence/leader-lease.repository.js';
 import { MerchantRepository } from './infrastructure/persistence/merchant.repository.js';
@@ -27,7 +29,7 @@ import { UlidFactory } from './infrastructure/system/ulid.js';
 import { WalletAllocatorProvider } from './infrastructure/wallet/allocator-provider.js';
 import { createKeyWrapperRegistry } from './infrastructure/wallet/key-wrapping.js';
 import { createLogger, type StructuredLogger } from './observability/logger.js';
-import { NetworkScannerWorker } from './workers/network-scanner.worker.js';
+import { NetworkWorker } from './workers/network-worker.js';
 
 /**
  * Explicit construction, in one place, in dependency order.
@@ -132,6 +134,7 @@ export function composeChainWorker(source: NodeJS.ProcessEnv, holderIdentity: st
   const observedBlockRepository = new ObservedBlockRepository(databasePool);
   const chainScanStore = new ChainScanStore(databasePool);
   const leaseRepository = new LeaderLeaseRepository(databasePool);
+  const evaluationQueueRepository = new EvaluationQueueRepository(databasePool);
   const ulidFactory = new UlidFactory();
 
   const workers = Object.values(NETWORK_CONFIGURATIONS)
@@ -149,7 +152,7 @@ export function composeChainWorker(source: NodeJS.ProcessEnv, holderIdentity: st
         finalityQuorumRpcUrls: rpcUrls.slice(1),
       });
 
-      return new NetworkScannerWorker({
+      return new NetworkWorker({
         gateway,
         scanner: new ScanNetworkUseCase({
           gateway,
@@ -160,6 +163,14 @@ export function composeChainWorker(source: NodeJS.ProcessEnv, holderIdentity: st
           chainScanStore,
           ulidFactory,
           now: () => new Date(),
+        }),
+        evaluator: new EvaluatePaymentsUseCase({
+          gateway,
+          paymentRepository,
+          paymentTransferRepository,
+          evaluationQueueRepository,
+          now: () => new Date(),
+          workerIdentity: holderIdentity,
         }),
         leaseRepository,
         blockCursorRepository,

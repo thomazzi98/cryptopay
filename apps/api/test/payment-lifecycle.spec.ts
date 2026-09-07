@@ -1,0 +1,502 @@
+import { readFile } from 'node:fs/promises';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+import type { Pool } from 'pg';
+import { createPublicClient, createWalletClient, http, type Abi, type Address } from 'viem';
+import { afterAll, beforeAll, beforeEach, describe, expect, inject, it } from 'vitest';
+
+import { EvaluatePaymentsUseCase } from '../src/application/evaluate-payments.use-case.js';
+import { ScanNetworkUseCase } from '../src/application/scan-network.use-case.js';
+import type {
+  ChainGateway,
+  FinalityConfirmation,
+} from '../src/application/ports/chain-gateway.port.js';
+import { EvmChainGateway } from '../src/infrastructure/chain/evm-chain-gateway.js';
+import { registerLocalDevelopmentAsset } from '../src/infrastructure/chain/network-configuration.js';
+import { BlockCursorRepository } from '../src/infrastructure/persistence/block-cursor.repository.js';
+import { ChainScanStore } from '../src/infrastructure/persistence/chain-scan.store.js';
+import { EvaluationQueueRepository } from '../src/infrastructure/persistence/evaluation-queue.repository.js';
+import { ObservedBlockRepository } from '../src/infrastructure/persistence/observed-block.repository.js';
+import { PaymentRepository } from '../src/infrastructure/persistence/payment.repository.js';
+import { PaymentTransferRepository } from '../src/infrastructure/persistence/payment-transfer.repository.js';
+import { UlidFactory } from '../src/infrastructure/system/ulid.js';
+import { anvilAccount, mineBlock } from './setup/anvil.global-setup.js';
+import { createIsolatedDatabase } from './setup/postgres.global-setup.js';
+
+/**
+ * A payment from creation to completion, driven only by what happens on the chain.
+ *
+ * This is the claim the whole system rests on: the backend decides, and the browser is never asked.
+ * Nothing in this file tells the API that a payment was made. A transfer is broadcast, blocks are
+ * mined, and the workers are ticked; everything else is the system's own conclusion.
+ */
+
+const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const MERCHANT_ID = 'mch_01K4QW6ZR2M8X4T7YQ0C3D5B9N';
+const FENCING_TOKEN = 1n;
+const REQUIRED_CONFIRMATIONS = 2;
+
+const payer = anvilAccount(0);
+const customer = anvilAccount(1);
+
+let pool: Pool;
+let dropDatabase: () => Promise<void>;
+let rpcUrl: string;
+let tokenAddress: string;
+let tokenAbi: Abi;
+let gateway: ChainGateway;
+let scanner: ScanNetworkUseCase;
+let payments: PaymentRepository;
+let paymentCounter = 0;
+let currentTime = new Date('2026-09-07T12:00:00.000Z');
+let secondOpinionCalls = 0;
+
+function publicClient() {
+  return createPublicClient({ transport: http(rpcUrl) });
+}
+
+/**
+ * A gateway that answers the finality question the way a chain publishing a finality tag would.
+ * Anvil publishes none, so the tag is supplied here rather than pretending the local chain has one;
+ * every other answer still comes from the real chain.
+ */
+function withFinalityTag(source: ChainGateway, lagBehindTip: bigint): ChainGateway {
+  return {
+    ...source,
+    networkIdentifier: source.networkIdentifier,
+    supportsFinalityTag: true,
+    assertLedgerIdentity: () => source.assertLedgerIdentity(),
+    readChainProgress: async () => {
+      const progress = await source.readChainProgress();
+      const finalized = progress.tip.height - lagBehindTip;
+      return { ...progress, finalizedHeight: finalized < 0n ? null : finalized };
+    },
+    confirmFinalizedHeight: async (height: bigint): Promise<FinalityConfirmation> => {
+      secondOpinionCalls += 1;
+      const progress = await source.readChainProgress();
+      return progress.tip.height - lagBehindTip >= height ? 'confirmed' : 'contradicted';
+    },
+    readPositionAtHeight: (height) => source.readPositionAtHeight(height),
+    scanIncomingTransfers: (request) => source.scanIncomingTransfers(request),
+    reconcileTransfer: (reference, expected) => source.reconcileTransfer(reference, expected),
+    readAssetBalance: (account, asset) => source.readAssetBalance(account, asset),
+    readNativeBalance: (account) => source.readNativeBalance(account),
+  };
+}
+
+function evaluatorFor(source: ChainGateway, workerIdentity: string): EvaluatePaymentsUseCase {
+  return new EvaluatePaymentsUseCase({
+    gateway: source,
+    paymentRepository: payments,
+    paymentTransferRepository: new PaymentTransferRepository(pool),
+    evaluationQueueRepository: new EvaluationQueueRepository(pool),
+    now: () => currentTime,
+    workerIdentity,
+  });
+}
+
+async function payTo(destination: string, amount: bigint): Promise<void> {
+  const wallet = createWalletClient({ account: customer, transport: http(rpcUrl) });
+  await wallet.writeContract({
+    address: tokenAddress as Address,
+    abi: tokenAbi,
+    functionName: 'transfer',
+    args: [destination as Address, amount],
+    account: customer,
+    chain: null,
+  });
+  await mineBlock(rpcUrl);
+}
+
+async function insertPayment(
+  receivingAccount: string,
+  options: {
+    requested?: bigint;
+    minimum?: bigint;
+    maximum?: bigint;
+    lifetimeMinutes?: number;
+  } = {},
+): Promise<string> {
+  paymentCounter += 1;
+  const id = `pay_01K4QW6ZR2M8X4T7YQ0C3D7${paymentCounter.toString().padStart(3, '0')}`;
+  const requested = options.requested ?? 25_000_000n;
+  await pool.query(
+    `INSERT INTO payments (
+       id, merchant_id, environment, network_identifier, checkout_token,
+       asset_reference, asset_symbol, asset_decimals,
+       requested_amount, minimum_acceptable_amount, maximum_acceptable_amount,
+       receiving_account, status, required_confirmations, requires_finality_tag,
+       created_at_block_height, expires_at
+     ) VALUES ($1,$2,'test','local-anvil',$1,$3,'USDC',6,$4,$5,$6,$7,'pending',$8,true,0,
+               $9::timestamptz + make_interval(mins => $10))`,
+    [
+      id,
+      MERCHANT_ID,
+      tokenAddress,
+      requested.toString(),
+      (options.minimum ?? requested).toString(),
+      (options.maximum ?? requested).toString(),
+      receivingAccount,
+      REQUIRED_CONFIRMATIONS,
+      currentTime.toISOString(),
+      options.lifetimeMinutes ?? 30,
+    ],
+  );
+  return id;
+}
+
+async function placeCursorAtTip(): Promise<void> {
+  const tip = await publicClient().getBlock({ blockTag: 'latest' });
+  await pool.query(
+    `INSERT INTO block_cursors
+       (network_identifier, last_scanned_height, last_scanned_reference, current_scan_range,
+        fencing_token)
+     VALUES ('local-anvil', $1, $2, 100, $3)
+     ON CONFLICT (network_identifier) DO UPDATE
+       SET last_scanned_height = EXCLUDED.last_scanned_height,
+           last_scanned_reference = EXCLUDED.last_scanned_reference,
+           consecutive_successes = 0,
+           halted_at = NULL,
+           halted_reason = NULL`,
+    [tip.number.toString(), tip.hash.toLowerCase(), FENCING_TOKEN.toString()],
+  );
+  await pool.query(`DELETE FROM observed_blocks WHERE network_identifier = 'local-anvil'`);
+  await pool.query('DELETE FROM payment_evaluation_queue');
+
+  // The sweep enqueues every live payment on the network, so a payment left confirming by an earlier
+  // test would be evaluated by this one and counted against its request budget. Retiring them keeps
+  // each test's live set to its own.
+  await pool.query(
+    `UPDATE payments SET status = 'canceled'
+      WHERE network_identifier = 'local-anvil'
+        AND status IN ('pending', 'partially_funded', 'confirming')`,
+  );
+}
+
+async function readStatus(paymentId: string): Promise<string> {
+  const result = await pool.query<{ status: string }>('SELECT status FROM payments WHERE id = $1', [
+    paymentId,
+  ]);
+  return result.rows[0]?.status ?? 'missing';
+}
+
+async function readPaymentRow(paymentId: string) {
+  const result = await pool.query<{
+    status: string;
+    status_version: number;
+    credited_amount: string;
+    confirmations_observed: number;
+    finality_confirmed: boolean;
+    completed_at: Date | null;
+    first_credited_at: Date | null;
+  }>(
+    `SELECT status, status_version, credited_amount, confirmations_observed, finality_confirmed,
+            completed_at, first_credited_at
+       FROM payments WHERE id = $1`,
+    [paymentId],
+  );
+  const row = result.rows[0];
+  if (row === undefined) {
+    throw new Error(`No payment ${paymentId}`);
+  }
+  return row;
+}
+
+async function transitionsFor(paymentId: string): Promise<string[]> {
+  const result = await pool.query<{ to_status: string }>(
+    `SELECT to_status FROM payment_status_transitions WHERE payment_id = $1 ORDER BY to_version`,
+    [paymentId],
+  );
+  return result.rows.map((row) => row.to_status);
+}
+
+/** One turn of the whole loop: observe the chain, then decide what it means. */
+async function tick(evaluator: EvaluatePaymentsUseCase): Promise<void> {
+  await scanner.execute(FENCING_TOKEN);
+  await evaluator.execute();
+}
+
+beforeAll(async () => {
+  rpcUrl = `http://127.0.0.1:${inject('anvilPort').toString()}`;
+  tokenAddress = inject('anvilTokenAddress');
+
+  const artifact = JSON.parse(
+    await readFile(resolve(packageRoot, 'test/fixtures/mock-usdc.json'), 'utf8'),
+  ) as { abi: Abi };
+  tokenAbi = artifact.abi;
+
+  const isolated = await createIsolatedDatabase(inject('postgresPort'), 'lifecycle');
+  pool = isolated.pool;
+  dropDatabase = isolated.drop;
+
+  await pool.query(`INSERT INTO merchants (id, name) VALUES ($1, 'Lifecycle Fixtures')`, [
+    MERCHANT_ID,
+  ]);
+  registerLocalDevelopmentAsset({ reference: tokenAddress, symbol: 'USDC', decimals: 6 });
+
+  const wallet = createWalletClient({ account: payer, transport: http(rpcUrl) });
+  await wallet.writeContract({
+    address: tokenAddress as Address,
+    abi: tokenAbi,
+    functionName: 'mint',
+    args: [customer.address, 1_000_000_000_000n],
+    account: payer,
+    chain: null,
+  });
+  await mineBlock(rpcUrl);
+
+  const chain = new EvmChainGateway({
+    networkIdentifier: 'local-anvil',
+    chainIdentifier: 31_337,
+    rpcUrls: [rpcUrl],
+    supportsFinalityTag: false,
+  });
+  gateway = withFinalityTag(chain, 3n);
+
+  payments = new PaymentRepository(pool);
+  scanner = new ScanNetworkUseCase({
+    gateway,
+    paymentRepository: payments,
+    paymentTransferRepository: new PaymentTransferRepository(pool),
+    blockCursorRepository: new BlockCursorRepository(pool),
+    observedBlockRepository: new ObservedBlockRepository(pool),
+    chainScanStore: new ChainScanStore(pool),
+    ulidFactory: new UlidFactory(),
+    now: () => currentTime,
+  });
+});
+
+afterAll(async () => {
+  await dropDatabase();
+});
+
+beforeEach(async () => {
+  currentTime = new Date('2026-09-07T12:00:00.000Z');
+  secondOpinionCalls = 0;
+  await placeCursorAtTip();
+});
+
+describe('a payment that is paid in full', () => {
+  it('reaches completed without anything ever telling the API it was paid', async () => {
+    const account = anvilAccount(30).address.toLowerCase();
+    const paymentId = await insertPayment(account);
+    const evaluator = evaluatorFor(gateway, 'worker-a');
+
+    await payTo(account, 25_000_000n);
+    await tick(evaluator);
+    expect(await readStatus(paymentId)).toBe('confirming');
+
+    for (let mined = 0; mined < 6; mined += 1) {
+      await mineBlock(rpcUrl);
+      await tick(evaluator);
+    }
+
+    const row = await readPaymentRow(paymentId);
+    expect(row.status).toBe('completed');
+    expect(row.credited_amount).toBe('25000000');
+    expect(row.finality_confirmed).toBe(true);
+    expect(row.completed_at).not.toBeNull();
+    expect(row.first_credited_at).not.toBeNull();
+  });
+
+  it('leaves an audit trail of exactly the transitions it took', async () => {
+    const account = anvilAccount(31).address.toLowerCase();
+    const paymentId = await insertPayment(account);
+    const evaluator = evaluatorFor(gateway, 'worker-a');
+
+    await payTo(account, 25_000_000n);
+    for (let mined = 0; mined < 7; mined += 1) {
+      await tick(evaluator);
+      await mineBlock(rpcUrl);
+    }
+
+    expect(await transitionsFor(paymentId)).toEqual(['confirming', 'completed']);
+  });
+
+  /**
+   * Confirmations climb on nearly every tick. If each were an audit row, the timeline a merchant
+   * reads would be hundreds of entries deep and the two that matter would be invisible.
+   */
+  it('does not write an audit row for every confirmation', async () => {
+    const account = anvilAccount(32).address.toLowerCase();
+    const paymentId = await insertPayment(account);
+    const evaluator = evaluatorFor(gateway, 'worker-a');
+
+    await payTo(account, 25_000_000n);
+    for (let mined = 0; mined < 7; mined += 1) {
+      await tick(evaluator);
+      await mineBlock(rpcUrl);
+    }
+
+    const transitions = await transitionsFor(paymentId);
+    const row = await readPaymentRow(paymentId);
+    expect(transitions.length).toBeLessThanOrEqual(2);
+    expect(row.status_version).toBe(2);
+  });
+});
+
+describe('the finality gate', () => {
+  /**
+   * Enough confirmations is not enough. The window between the count being satisfied and the block
+   * being finalized is exactly where a reorg lives, and a count-only gate pays the merchant inside
+   * it.
+   */
+  it('holds a payment that has the confirmations but not the finality', async () => {
+    const account = anvilAccount(33).address.toLowerCase();
+    const paymentId = await insertPayment(account);
+    const laggingFinality = withFinalityTag(gateway, 40n);
+    const evaluator = evaluatorFor(laggingFinality, 'worker-a');
+
+    await payTo(account, 25_000_000n);
+    for (let mined = 0; mined < 8; mined += 1) {
+      await scanner.execute(FENCING_TOKEN);
+      await evaluator.execute();
+      await mineBlock(rpcUrl);
+    }
+
+    const row = await readPaymentRow(paymentId);
+    expect(row.status).toBe('confirming');
+    expect(row.confirmations_observed).toBeGreaterThan(REQUIRED_CONFIRMATIONS);
+  });
+
+  /**
+   * The quorum call costs a request, so it is spent only when a payment is otherwise ready to
+   * complete. Asking on every tick would multiply the request budget by the polling rate for an
+   * answer that cannot change the outcome.
+   */
+  it('asks a second provider only when a completion is otherwise eligible', async () => {
+    const account = anvilAccount(34).address.toLowerCase();
+    await insertPayment(account);
+    const evaluator = evaluatorFor(gateway, 'worker-a');
+
+    await tick(evaluator);
+    await tick(evaluator);
+    expect(secondOpinionCalls).toBe(0);
+
+    await payTo(account, 25_000_000n);
+    await tick(evaluator);
+    expect(secondOpinionCalls).toBe(0);
+
+    for (let mined = 0; mined < 6; mined += 1) {
+      await mineBlock(rpcUrl);
+      await tick(evaluator);
+    }
+    expect(secondOpinionCalls).toBeGreaterThan(0);
+    expect(secondOpinionCalls).toBeLessThanOrEqual(4);
+  });
+});
+
+describe('a payment that is not paid in full', () => {
+  it('sits in partially_funded while the amount is short', async () => {
+    const account = anvilAccount(35).address.toLowerCase();
+    const paymentId = await insertPayment(account);
+    const evaluator = evaluatorFor(gateway, 'worker-a');
+
+    await payTo(account, 10_000_000n);
+    await tick(evaluator);
+
+    expect(await readStatus(paymentId)).toBe('partially_funded');
+  });
+
+  it('completes once the remainder arrives, summing the transfers', async () => {
+    const account = anvilAccount(36).address.toLowerCase();
+    const paymentId = await insertPayment(account);
+    const evaluator = evaluatorFor(gateway, 'worker-a');
+
+    await payTo(account, 10_000_000n);
+    await tick(evaluator);
+    await payTo(account, 15_000_000n);
+    for (let mined = 0; mined < 7; mined += 1) {
+      await tick(evaluator);
+      await mineBlock(rpcUrl);
+    }
+
+    const row = await readPaymentRow(paymentId);
+    expect(row.status).toBe('completed');
+    expect(row.credited_amount).toBe('25000000');
+  });
+
+  it('becomes underpaid rather than expired when the clock runs out with money in it', async () => {
+    const account = anvilAccount(37).address.toLowerCase();
+    const paymentId = await insertPayment(account, { lifetimeMinutes: 30 });
+    const evaluator = evaluatorFor(gateway, 'worker-a');
+
+    await payTo(account, 10_000_000n);
+    await tick(evaluator);
+
+    currentTime = new Date('2026-09-07T12:31:00.000Z');
+    await evaluator.execute();
+
+    expect(await readStatus(paymentId)).toBe('underpaid');
+  });
+
+  it('expires with nothing credited', async () => {
+    const account = anvilAccount(38).address.toLowerCase();
+    const paymentId = await insertPayment(account, { lifetimeMinutes: 30 });
+    const evaluator = evaluatorFor(gateway, 'worker-a');
+
+    currentTime = new Date('2026-09-07T12:31:00.000Z');
+    await evaluator.execute();
+
+    expect(await readStatus(paymentId)).toBe('expired');
+  });
+
+  /**
+   * The race that decides whether a customer loses their money. Their transfer has already left
+   * their wallet; expiring the payment on a timer that fired in the same second would be taking it.
+   */
+  it('never expires a payment that is already funded and confirming', async () => {
+    const account = anvilAccount(39).address.toLowerCase();
+    const paymentId = await insertPayment(account, { lifetimeMinutes: 30 });
+    const evaluator = evaluatorFor(gateway, 'worker-a');
+
+    await payTo(account, 25_000_000n);
+    currentTime = new Date('2026-09-07T12:31:00.000Z');
+    await tick(evaluator);
+
+    expect(await readStatus(paymentId)).toBe('confirming');
+  });
+});
+
+describe('overpayment', () => {
+  it('is a separate outcome from a completion, never silently pocketed', async () => {
+    const account = anvilAccount(40).address.toLowerCase();
+    const paymentId = await insertPayment(account);
+    const evaluator = evaluatorFor(gateway, 'worker-a');
+
+    await payTo(account, 40_000_000n);
+    for (let mined = 0; mined < 7; mined += 1) {
+      await tick(evaluator);
+      await mineBlock(rpcUrl);
+    }
+
+    const row = await readPaymentRow(paymentId);
+    expect(row.status).toBe('overpaid');
+    expect(row.credited_amount).toBe('40000000');
+  });
+});
+
+describe('two workers evaluating the same payments', () => {
+  /**
+   * The compare-and-swap, not the lease, is what makes this safe. Both workers see the same payment
+   * at the same version and exactly one write lands; the unique constraint on
+   * (payment_id, to_version) is the backstop if the comparison were ever bypassed.
+   */
+  it('produces exactly one transition per payment', async () => {
+    const account = anvilAccount(41).address.toLowerCase();
+    const paymentId = await insertPayment(account);
+    await payTo(account, 25_000_000n);
+    await scanner.execute(FENCING_TOKEN);
+
+    await Promise.all([
+      evaluatorFor(gateway, 'worker-a').execute(),
+      evaluatorFor(gateway, 'worker-b').execute(),
+      evaluatorFor(gateway, 'worker-c').execute(),
+    ]);
+
+    const row = await readPaymentRow(paymentId);
+    expect(await transitionsFor(paymentId)).toEqual(['confirming']);
+    expect(row.status_version).toBe(1);
+  });
+});

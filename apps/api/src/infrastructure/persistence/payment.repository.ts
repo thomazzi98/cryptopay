@@ -287,6 +287,54 @@ export class PaymentRepository {
     return result.rows.map((row) => toPayment(row));
   }
 
+  /**
+   * Loads payments by identifier without a merchant scope. Used only by the workers, which act on
+   * behalf of the system rather than of a caller; every path a merchant can reach goes through
+   * findById, which scopes in the query so another merchant's payment answers 404.
+   */
+  async findByIdentifiers(identifiers: readonly string[]): Promise<readonly Payment[]> {
+    if (identifiers.length === 0) {
+      return [];
+    }
+    const result = await this.pool.query<PaymentRow>(
+      `SELECT ${PAYMENT_COLUMNS} FROM payments WHERE id = ANY($1::text[])`,
+      [[...identifiers]],
+    );
+    return result.rows.map((row) => toPayment(row));
+  }
+
+  /**
+   * Records figures that changed without the status changing, under the same compare-and-swap.
+   *
+   * No audit row is written. A confirmation count advances on nearly every tick while a payment is
+   * confirming, and a transition row for each would bury the handful that matter under hundreds that
+   * do not. The compare-and-swap still applies, so this can never overwrite a concurrent transition.
+   */
+  async saveProgress(payment: Payment, expectedVersion: number): Promise<boolean> {
+    const result = await this.pool.query(
+      `UPDATE payments
+          SET credited_amount = $3,
+              confirmations_observed = $4,
+              finality_confirmed = $5,
+              settling_block_height = $6,
+              first_credited_at = CASE
+                WHEN first_credited_at IS NULL AND $3::numeric > 0 THEN now()
+                ELSE first_credited_at
+              END,
+              updated_at = now()
+        WHERE id = $1 AND status_version = $2`,
+      [
+        payment.identifier,
+        expectedVersion,
+        payment.creditedAmountInBaseUnits.toString(),
+        payment.confirmationsObserved,
+        payment.finalityConfirmed,
+        payment.settlingBlockHeight?.toString() ?? null,
+      ],
+    );
+    return (result.rowCount ?? 0) > 0;
+  }
+
   async list(filter: PaymentListFilter): Promise<PaymentPage> {
     const conditions = ['merchant_id = $1', 'environment = $2::environment_name'];
     const values: unknown[] = [filter.merchantId, filter.environment];
@@ -365,6 +413,10 @@ export class PaymentRepository {
                 finality_confirmed = $7,
                 settling_block_height = $8,
                 completed_at = $9,
+                first_credited_at = CASE
+                  WHEN first_credited_at IS NULL AND $5::numeric > 0 THEN now()
+                  ELSE first_credited_at
+                END,
                 updated_at = now()
           WHERE id = $1 AND status_version = $2`,
         [
