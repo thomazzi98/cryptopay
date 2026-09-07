@@ -34,6 +34,10 @@ export default defineConfig({
           // each spec then clones the migrated template, which is a file copy.
           testTimeout: 60_000,
           hookTimeout: 180_000,
+          // One Anvil instance is shared by every spec here, and the reorg suite rewrites its
+          // history. Running the files in parallel would let one spec's fork land in the middle of
+          // another's scan, so they run one at a time.
+          fileParallelism: false,
         },
       },
       {

@@ -54,6 +54,12 @@ export class ChainScanStore {
    * Commits one scanned window: the transfers, the headers covering it, the payments that now need
    * re-evaluating, and the cursor advance, in a single transaction.
    *
+   * A transfer that is already recorded is updated to its new position rather than skipped. A reorg
+   * usually returns the transaction to the mempool and it is re-mined into a different block, keeping
+   * the same transaction identity; skipping the conflict would leave that row orphaned forever and
+   * lose a customer's payment. The amount and the classification are deliberately left untouched:
+   * both were decided when the transfer was first seen, and neither changes because a block did.
+   *
    * The cursor moves only with the data it covers. A crash anywhere inside this transaction replays
    * the identical window on restart, and the uniqueness constraint on
    * (network_identifier, transaction_reference, event_index) makes the replay a no-op. That is what
@@ -74,7 +80,12 @@ export class ChainScanStore {
              (id, payment_id, network_identifier, transaction_reference, event_index, block_height,
               block_reference, source_account, asset_reference, amount, classification)
            VALUES ($1,$2,$3::network_identifier,$4,$5,$6,$7,$8,$9,$10,$11::transfer_classification)
-           ON CONFLICT (network_identifier, transaction_reference, event_index) DO NOTHING`,
+           ON CONFLICT (network_identifier, transaction_reference, event_index) DO UPDATE
+             SET block_height = EXCLUDED.block_height,
+                 block_reference = EXCLUDED.block_reference,
+                 observation = 'observed',
+                 orphaned_at = NULL,
+                 finalized_at = NULL`,
           [
             record.identifier,
             record.paymentId,

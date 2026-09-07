@@ -110,7 +110,7 @@ export class ScanNetworkUseCase {
 
     const progress = await this.dependencies.gateway.readChainProgress();
 
-    const fork = await this.resolveFork(cursor);
+    const fork = await this.resolveFork(cursor, progress.tip.height);
     if (fork.kind === 'unresolvable') {
       await this.dependencies.blockCursorRepository.halt(this.network, fork.reason, fencingToken);
       return { kind: 'halted', reason: fork.reason };
@@ -191,7 +191,7 @@ export class ScanNetworkUseCase {
    * because a fork in a window that contained no transfers is the ordinary case and is invisible to
    * a walk over payment rows.
    */
-  private async resolveFork(cursor: BlockCursor): Promise<ForkResolution> {
+  private async resolveFork(cursor: BlockCursor, tipHeight: bigint): Promise<ForkResolution> {
     const limit = networkConfigurationFor(this.network).maximumReorgDepth;
     const stored = await this.dependencies.observedBlockRepository.findDescendingFrom(
       this.network,
@@ -206,6 +206,14 @@ export class ScanNetworkUseCase {
 
     let divergenceSeen = false;
     for (const header of stored) {
+      // A chain shorter than the history stored for it has dropped those blocks. Asking the endpoint
+      // about a height above its own tip would come back as unanswerable and read as a pruned node,
+      // which would halt the network for what is an ordinary reorg.
+      if (header.height > tipHeight) {
+        divergenceSeen = true;
+        continue;
+      }
+
       const lookup = await this.dependencies.gateway.readPositionAtHeight(header.height);
       if (lookup.kind === 'absent') {
         return {
@@ -224,9 +232,33 @@ export class ScanNetworkUseCase {
       divergenceSeen = true;
     }
 
+    // Every header on record diverges. If a full depth of them was walked, the fork is further back
+    // than this system is willing to reason about and the answer is to stop.
+    if (stored.length > limit) {
+      return {
+        kind: 'unresolvable',
+        reason: `the chain diverged by more than ${limit.toString()} blocks`,
+      };
+    }
+
+    // Fewer headers than the limit were on record, so the fork is at or below the oldest block this
+    // network was ever seen at. Rewinding to just below it rescans more than strictly necessary,
+    // which costs a few requests and cannot credit anything twice.
+    const oldest = stored.at(-1);
+    if (oldest === undefined || oldest.height === 0n) {
+      return { kind: 'unresolvable', reason: 'the fork is below the first block on record' };
+    }
+    const anchorHeight = oldest.height - 1n;
+    const anchor = await this.dependencies.gateway.readPositionAtHeight(anchorHeight);
+    if (anchor.kind !== 'present') {
+      return {
+        kind: 'unresolvable',
+        reason: `the endpoint could not answer for block ${anchorHeight.toString()}`,
+      };
+    }
     return {
-      kind: 'unresolvable',
-      reason: `the chain diverged by more than ${limit.toString()} blocks`,
+      kind: 'forked',
+      header: { height: anchorHeight, reference: anchor.header.position.reference },
     };
   }
 
@@ -260,7 +292,7 @@ export class ScanNetworkUseCase {
           toHeight,
           watchedAccounts,
           assetReferences,
-          headerDepth: configuration.maximumReorgDepth,
+          headerDepth: configuration.maximumReorgDepth + 1,
         });
         return { result, nextScanRange: this.grownRange(cursor, range, shrank), shrank };
       } catch (error) {
