@@ -67,7 +67,16 @@ jobs:
       - run: npm run build
       # PostgreSQL and Anvil are both started by the suite itself as native binaries, so there is no
       # service container to wait on and the same command runs identically on a developer machine.
-      - run: npm run test:integration
+      # Coverage is measured here rather than in the unit job because only this one can run every
+      # suite, and a coverage number that silently excludes the integration tests is a lie.
+      - run: npm run test:coverage
+      - name: Upload coverage report
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: coverage
+          path: coverage/
+          retention-days: 7
 
   unit:
     name: Unit tests
@@ -80,11 +89,6 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
-      - run: npm run test:coverage
-      - name: Upload coverage report
-        if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: coverage
-          path: coverage/
-          retention-days: 7
+      # The fast suites only: no database, no chain, so this is the job that fails first and
+      # fastest when something ordinary is broken.
+      - run: npm test
