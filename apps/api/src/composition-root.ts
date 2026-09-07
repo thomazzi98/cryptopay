@@ -1,11 +1,15 @@
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomInt } from 'node:crypto';
 
 import type { Pool } from 'pg';
 
 import { CancelPaymentUseCase } from './application/cancel-payment.use-case.js';
 import { CreatePaymentUseCase } from './application/create-payment.use-case.js';
+import { DeliverCallbacksUseCase } from './application/deliver-callbacks.use-case.js';
 import { EvaluatePaymentsUseCase } from './application/evaluate-payments.use-case.js';
 import { ScanNetworkUseCase } from './application/scan-network.use-case.js';
+import { LIVE_RETRY_POLICY, TEST_RETRY_POLICY } from './domain/webhook-retry.js';
+import { sendCallback } from './infrastructure/callbacks/callback-transport.js';
+import { resolveSystemAddresses } from './infrastructure/callbacks/address-resolver.js';
 import { type Configuration, loadConfiguration, rpcUrlsFor } from './configuration.js';
 import { buildServer } from './http/build-server.js';
 import type { ApplicationServer } from './http/server-types.js';
@@ -25,10 +29,13 @@ import { ObservedBlockRepository } from './infrastructure/persistence/observed-b
 import { PaymentRepository } from './infrastructure/persistence/payment.repository.js';
 import { PaymentTransferRepository } from './infrastructure/persistence/payment-transfer.repository.js';
 import { WalletSeedRepository } from './infrastructure/persistence/wallet-seed.repository.js';
+import { WebhookDeliveryRepository } from './infrastructure/persistence/webhook-delivery.repository.js';
+import { WebhookSecretRepository } from './infrastructure/persistence/webhook-secret.repository.js';
 import { UlidFactory } from './infrastructure/system/ulid.js';
 import { WalletAllocatorProvider } from './infrastructure/wallet/allocator-provider.js';
 import { createKeyWrapperRegistry } from './infrastructure/wallet/key-wrapping.js';
 import { createLogger, type StructuredLogger } from './observability/logger.js';
+import { CallbackWorker } from './workers/callback-worker.js';
 import { NetworkWorker } from './workers/network-worker.js';
 
 /**
@@ -106,6 +113,52 @@ export interface BackgroundWorker {
   readonly databasePool: Pool;
   start(): Promise<void>;
   stop(): Promise<void>;
+}
+
+/**
+ * The callback worker, composed separately because it is deployed separately.
+ *
+ * It is the only part of the system that makes outbound requests to addresses a stranger chose, so
+ * it runs in its own container with its own database role and its own network policy. Composing it
+ * here rather than folding it into the API is what keeps that separation real rather than aspirational.
+ */
+export function composeCallbackWorker(
+  source: NodeJS.ProcessEnv,
+  workerIdentity: string,
+): BackgroundWorker {
+  const configuration = loadConfiguration(source);
+  const logger = createLogger(configuration);
+  const databasePool = createDatabasePool(configuration);
+
+  const deliverer = new DeliverCallbacksUseCase({
+    webhookDeliveryRepository: new WebhookDeliveryRepository(databasePool),
+    webhookSecretRepository: new WebhookSecretRepository(databasePool),
+    transport: sendCallback,
+    resolveAddresses: resolveSystemAddresses,
+    // The test schedule finishes inside half an hour, which is what a developer watching a failing
+    // endpoint needs; the live one spans two days, which is what a merchant who was down needs.
+    retryPolicy:
+      configuration.nodeEnvironment === 'production' ? LIVE_RETRY_POLICY : TEST_RETRY_POLICY,
+    privateDestinationAllowlist: configuration.callbackPrivateDestinationAllowlist,
+    // Operations holds this condition. The merchant's choice of API key holds the other one, and the
+    // use case requires both.
+    allowlistIsPermittedByDeployment: configuration.nodeEnvironment !== 'production',
+    workerIdentity,
+    now: () => new Date(),
+    randomFraction: () => randomInt(0, 1_000_000) / 1_000_000,
+  });
+
+  const worker = new CallbackWorker({ deliverer, logger });
+
+  return {
+    logger,
+    databasePool,
+    start: () => worker.start(),
+    stop: () => {
+      worker.stop();
+      return Promise.resolve();
+    },
+  };
 }
 
 /**
