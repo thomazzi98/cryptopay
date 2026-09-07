@@ -93,6 +93,8 @@ function evaluatorFor(source: ChainGateway, workerIdentity: string): EvaluatePay
     evaluationQueueRepository: new EvaluationQueueRepository(pool),
     now: () => currentTime,
     workerIdentity,
+    ulidFactory: new UlidFactory(),
+    checkoutBaseUrl: 'https://pay.cryptopay.test',
   });
 }
 

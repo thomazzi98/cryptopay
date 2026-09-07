@@ -101,7 +101,7 @@ export function buildApplicationServer(
   });
 }
 
-export interface ChainWorker {
+export interface BackgroundWorker {
   readonly logger: StructuredLogger;
   readonly databasePool: Pool;
   start(): Promise<void>;
@@ -115,7 +115,10 @@ export interface ChainWorker {
  * mistake: there is no way to name a network to watch and forget to give it an endpoint, and no way
  * to configure an endpoint that silently goes unwatched.
  */
-export function composeChainWorker(source: NodeJS.ProcessEnv, holderIdentity: string): ChainWorker {
+export function composeChainWorker(
+  source: NodeJS.ProcessEnv,
+  holderIdentity: string,
+): BackgroundWorker {
   const configuration = loadConfiguration(source);
   const logger = createLogger(configuration);
   const databasePool = createDatabasePool(configuration);
@@ -171,6 +174,8 @@ export function composeChainWorker(source: NodeJS.ProcessEnv, holderIdentity: st
           evaluationQueueRepository,
           now: () => new Date(),
           workerIdentity: holderIdentity,
+          ulidFactory,
+          checkoutBaseUrl: configuration.publicCheckoutBaseUrl,
         }),
         leaseRepository,
         blockCursorRepository,

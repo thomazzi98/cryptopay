@@ -8,6 +8,8 @@ import { settlingBlockHeight, sumCreditedAmount } from '../domain/transfer-ledge
 import type { EvaluationQueueRepository } from '../infrastructure/persistence/evaluation-queue.repository.js';
 import type { PaymentRepository } from '../infrastructure/persistence/payment.repository.js';
 import type { PaymentTransferRepository } from '../infrastructure/persistence/payment-transfer.repository.js';
+import type { UlidFactory } from '../infrastructure/system/ulid.js';
+import { buildOutboxEntry } from './callback-payload.js';
 import type { ChainGateway } from './ports/chain-gateway.port.js';
 
 /**
@@ -39,6 +41,8 @@ export interface EvaluatePaymentsDependencies {
   readonly evaluationQueueRepository: EvaluationQueueRepository;
   readonly now: () => Date;
   readonly workerIdentity: string;
+  readonly ulidFactory: UlidFactory;
+  readonly checkoutBaseUrl: string;
   readonly batchSize?: number;
   readonly claimLeaseSeconds?: number;
 }
@@ -152,6 +156,9 @@ export class EvaluatePaymentsUseCase {
         expectedVersion: payment.statusVersion,
         command: 'applyLedgerObservation',
         causedBy: applied.trigger,
+        // Written inside the same transaction as the status change. A completed payment that nobody
+        // was told about is therefore not a state this database can hold.
+        outbox: this.outboxFor(applied.payment, now),
       });
       return { result: saved ? 'transitioned' : 'contended', secondOpinionRequested };
     }
@@ -202,7 +209,18 @@ export class EvaluatePaymentsUseCase {
       expectedVersion: payment.statusVersion,
       command: decision.command,
       causedBy: decision.trigger,
+      outbox: this.outboxFor(decision.payment, now),
     });
     return saved ? 'transitioned' : 'contended';
+  }
+
+  private outboxFor(payment: Payment, now: Date) {
+    return buildOutboxEntry({
+      payment,
+      eventType: `payment.${payment.status}`,
+      occurredAt: now,
+      checkoutBaseUrl: this.dependencies.checkoutBaseUrl,
+      ulidFactory: this.dependencies.ulidFactory,
+    });
   }
 }

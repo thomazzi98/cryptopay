@@ -119,6 +119,25 @@ export interface PaymentPage {
   readonly nextCursor: string | null;
 }
 
+/**
+ * A callback to enqueue alongside the transition that caused it.
+ *
+ * This is the outbox, and it is written inside the same transaction as the payment update. The
+ * alternative, committing the payment and then enqueuing the notification, has a window in which the
+ * process can die: the payment is completed forever and the merchant is never told. There is a test
+ * that forces this insert to fail and asserts the payment update rolls back with it.
+ */
+export interface OutboxEntry {
+  /** Also the `webhook-id` header, so it is stable across every retry and any redelivery. */
+  readonly identifier: string;
+  readonly merchantId: string;
+  readonly environment: Environment;
+  readonly eventType: string;
+  readonly destinationUrl: string;
+  /** Serialized once, here, and transmitted byte for byte: the signature covers exactly these bytes. */
+  readonly payload: string;
+}
+
 export interface SaveTransitionInput {
   readonly payment: Payment;
   /** The status before the command was applied; the audit trail records the edge, not the endpoint. */
@@ -126,6 +145,7 @@ export interface SaveTransitionInput {
   readonly expectedVersion: number;
   readonly command: string;
   readonly causedBy: string | null;
+  readonly outbox?: OutboxEntry | null;
 }
 
 export interface CreatePaymentRecord {
@@ -456,6 +476,27 @@ export class PaymentRepository {
           payment.confirmationsObserved,
         ],
       );
+
+      const outbox = input.outbox;
+      if (outbox !== null && outbox !== undefined) {
+        // The uniqueness of (payment_id, event_type) is what makes a replayed transition produce one
+        // notification rather than two. A conflict here is the ordinary path, not an error.
+        await client.query(
+          `INSERT INTO webhook_deliveries
+             (id, merchant_id, payment_id, environment, event_type, destination_url, payload)
+           VALUES ($1,$2,$3,$4::environment_name,$5,$6,$7)
+           ON CONFLICT (payment_id, event_type) DO NOTHING`,
+          [
+            outbox.identifier,
+            outbox.merchantId,
+            payment.identifier,
+            outbox.environment,
+            outbox.eventType,
+            outbox.destinationUrl,
+            outbox.payload,
+          ],
+        );
+      }
 
       await client.query('COMMIT');
       return true;
