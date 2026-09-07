@@ -76,6 +76,9 @@ export function buildApplicationServer(
   const idempotencyRepository = new IdempotencyRepository(databasePool);
   const walletSeedRepository = new WalletSeedRepository(databasePool);
   const blockCursorRepository = new BlockCursorRepository(databasePool);
+  const paymentTransferRepository = new PaymentTransferRepository(databasePool);
+  const webhookDeliveryRepository = new WebhookDeliveryRepository(databasePool);
+  const webhookSecretRepository = new WebhookSecretRepository(databasePool);
 
   const walletAllocators = new WalletAllocatorProvider(
     walletSeedRepository,
@@ -105,6 +108,11 @@ export function buildApplicationServer(
     idempotencyRepository,
     paymentCreator,
     paymentCanceler,
+    paymentTransferRepository,
+    webhookDeliveryRepository,
+    webhookSecretRepository,
+    blockCursorRepository,
+    ulidFactory,
   });
 }
 

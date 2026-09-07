@@ -1,10 +1,17 @@
-import { formatBaseUnits, type Payment as PaymentContract } from '@cryptopay/shared';
+import {
+  formatBaseUnits,
+  type NetworkIdentifier,
+  type Payment as PaymentContract,
+  type PaymentTransfer as PaymentTransferContract,
+} from '@cryptopay/shared';
 
 import type { Payment } from '../../domain/payment.js';
 import {
   explorerAccountUrl,
+  explorerTransactionUrl,
   networkConfigurationFor,
 } from '../../infrastructure/chain/network-configuration.js';
+import type { StoredTransfer } from '../../infrastructure/persistence/payment-transfer.repository.js';
 
 /**
  * Turns the aggregate into the response body.
@@ -61,5 +68,31 @@ export function presentPayment(
     expiresAt: payment.expiresAt.toISOString(),
     completedAt: payment.completedAt?.toISOString() ?? null,
     transfers: [],
+  };
+}
+
+/**
+ * A transfer as the merchant sees it. Orphaned rows are presented rather than filtered, with the
+ * observation carried through so the interface can strike them out instead of hiding them.
+ */
+export function presentTransfer(
+  transfer: StoredTransfer,
+  network: NetworkIdentifier,
+  decimals: number,
+): PaymentTransferContract {
+  return {
+    transactionReference: transfer.transactionReference,
+    eventIndex: transfer.eventIndex,
+    blockHeight: transfer.blockHeight.toString(),
+    blockReference: transfer.blockReference,
+    sourceAccount: transfer.sourceAccount,
+    amount: {
+      baseUnits: transfer.amountInBaseUnits.toString(),
+      display: formatBaseUnits(transfer.amountInBaseUnits, decimals),
+    },
+    classification: transfer.classification,
+    observation: transfer.observation,
+    explorerUrl: explorerTransactionUrl(network, transfer.transactionReference),
+    observedAt: transfer.observedAt.toISOString(),
   };
 }

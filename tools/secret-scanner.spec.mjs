@@ -14,6 +14,26 @@ import {
 
 const REAL_LOOKING_KEY = '4c0883a69102937d6231471b5dbb6204fe512961708279e6a3f2c1b8d9e4a7f3';
 
+/**
+ * Credential fixtures are assembled here rather than written out.
+ *
+ * A literal that matches a credential pattern is a leak to every scanner that reads the file,
+ * including GitHub's, whatever the value actually is. Building the fixture from parts means this
+ * file can assert that the shape is caught without containing the shape.
+ */
+const VARIED_ALPHABET = 'abcdefghijklmnopqrstuvwxyz0123456789';
+
+function randomLookingTail(length) {
+  return Array.from(
+    { length },
+    (unused, index) => VARIED_ALPHABET[(index * 7 + 3) % VARIED_ALPHABET.length],
+  ).join('');
+}
+
+function credentialShaped(head, tail, tailLength) {
+  return `${head}${tail}${randomLookingTail(tailLength)}`;
+}
+
 describe('detecting a leaked secret', () => {
   it.each([
     {
@@ -33,6 +53,59 @@ describe('detecting a leaked secret', () => {
     },
   ])('flags $description', ({ line }) => {
     expect(buildFindings('sample.ts', line)).not.toHaveLength(0);
+  });
+});
+
+/**
+ * The class the name-based rules cannot see. A signing secret assigned to a name no list contains
+ * reached GitHub, which raised two alerts against it; these assertions are what stop that recurring.
+ */
+describe('detecting a credential by its prefix alone', () => {
+  it.each([
+    ['a webhook signing secret', 'wh', 'sec_', 32],
+    ['a Stripe secret key', 'sk_', 'live_', 24],
+    ['a GitHub personal access token', 'gh', 'p_', 36],
+    ['an AWS access key identifier', 'AK', 'IA', 16],
+    ['a Slack bot token', 'xo', 'xb-', 24],
+    ['a Google API key', 'AI', 'za', 35],
+    ['an npm token', 'np', 'm_', 36],
+    ['a BIP-32 extended private key', 'xp', 'rv', 104],
+  ])('refuses %s however it is named', (unusedName, head, tail, tailLength) => {
+    const line = `const anythingAtAll = '${credentialShaped(head, tail, tailLength)}';`;
+    expect(buildFindings('src/whatever.ts', line)).not.toHaveLength(0);
+  });
+
+  it('catches it in an object property, a call argument and an environment line alike', () => {
+    const value = credentialShaped('wh', 'sec_', 32);
+    const shapes = [
+      `  signingSecret: '${value}',`,
+      `  verify(request, '${value}');`,
+      `WEBHOOK_SECRET=${value}`,
+    ];
+    for (const shape of shapes) {
+      expect(buildFindings('src/whatever.ts', shape)).not.toHaveLength(0);
+    }
+  });
+
+  /**
+   * The prefix on its own carries no key material. Refusing it would fire on the constant in the
+   * signing module and on the CHECK constraint in the migration, and a scanner that cries wolf is a
+   * scanner nobody keeps.
+   */
+  it('leaves a bare prefix constant alone', () => {
+    expect(buildFindings('src/webhook-signature.ts', `const SECRET_PREFIX = 'whsec_';`)).toEqual(
+      [],
+    );
+  });
+
+  it('leaves a SQL constraint on the prefix alone', () => {
+    const line = `  secret TEXT NOT NULL CHECK (secret LIKE 'whsec_%'),`;
+    expect(buildFindings('migrations/0002_callbacks.sql', line)).toEqual([]);
+  });
+
+  it('leaves a repeated-character fixture alone, because it carries no entropy', () => {
+    const line = `const fixture = 'whsec_${'k'.repeat(40)}';`;
+    expect(buildFindings('src/whatever.spec.ts', line)).toEqual([]);
   });
 });
 

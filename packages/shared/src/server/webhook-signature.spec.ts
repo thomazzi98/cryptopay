@@ -2,6 +2,12 @@ import { createHmac } from 'node:crypto';
 
 import { describe, expect, it } from 'vitest';
 
+/**
+ * Assembled rather than written, so this file contains no literal that matches a credential pattern.
+ * The prefix on its own carries no key material.
+ */
+const SECRET_PREFIX = `whsec_`;
+
 import {
   generateSigningSecret,
   signWebhook,
@@ -15,8 +21,16 @@ import {
  * exploitable rather than merely inconvenient.
  */
 
-const SECRET = 'whsec_c2VjcmV0LWtleS1tYXRlcmlhbC10aGlydHktdHdvLWI=';
-const OTHER_SECRET = 'whsec_YW5vdGhlci1zZWNyZXQta2V5LW1hdGVyaWFsLTMyLQ==';
+/**
+ * Generated, never written down.
+ *
+ * A credential-shaped literal must not appear in source even when the value is fabricated, because
+ * nothing reading the file can tell a fabricated one from a real one: not a reviewer, not a scanner,
+ * and not GitHub, which raised two Stripe alerts against exactly this pattern. Generating the value
+ * gives the tests a real secret to exercise and leaves nothing to leak.
+ */
+const SECRET = generateSigningSecret();
+const OTHER_SECRET = generateSigningSecret();
 const IDENTIFIER = 'whd_01K4QW6ZR2M8X4T7YQ0C3D5B9N';
 const NOW = 1_788_000_000;
 const BODY = '{"type":"payment.completed","data":{"id":"pay_01K4QW6ZR2M8X4T7YQ0C3D5B9N"}}';
@@ -41,7 +55,7 @@ describe('signing a webhook', () => {
    * with `svix` or `standardwebhooks` on day one and never reads our documentation.
    */
   it('signs the id, the timestamp and the body, in that order, separated by dots', () => {
-    const expected = createHmac('sha256', Buffer.from(SECRET.slice('whsec_'.length), 'base64'))
+    const expected = createHmac('sha256', Buffer.from(SECRET.slice(SECRET_PREFIX.length), 'base64'))
       .update(`${IDENTIFIER}.${NOW.toString()}.${BODY}`)
       .digest('base64');
     expect(headersOf()['webhook-signature']).toBe(`v1,${expected}`);
@@ -109,7 +123,12 @@ describe('verifying a webhook', () => {
       secrets: [OTHER_SECRET],
     });
     expect(
-      verifyWebhook({ headers: signed, body: BODY, secrets: [SECRET, OTHER_SECRET], now: NOW }),
+      verifyWebhook({
+        headers: { ...signed },
+        body: BODY,
+        secrets: [SECRET, OTHER_SECRET],
+        now: NOW,
+      }),
     ).toEqual({ kind: 'valid' });
   });
 
@@ -210,12 +229,12 @@ describe('verifying a webhook', () => {
 
 describe('generating a signing secret', () => {
   it('is prefixed so it is recognisable in a log or a support ticket', () => {
-    expect(generateSigningSecret().startsWith('whsec_')).toBe(true);
+    expect(generateSigningSecret().startsWith(SECRET_PREFIX)).toBe(true);
   });
 
   it('carries 32 bytes of randomness', () => {
     const secret = generateSigningSecret();
-    expect(Buffer.from(secret.slice('whsec_'.length), 'base64')).toHaveLength(32);
+    expect(Buffer.from(secret.slice(SECRET_PREFIX.length), 'base64')).toHaveLength(32);
   });
 
   it('never repeats', () => {
@@ -231,6 +250,12 @@ describe('generating a signing secret', () => {
       body: BODY,
       secrets: [secret],
     });
-    expect(verifyWebhook({ headers, body: BODY, secrets: [secret], now: NOW }).kind).toBe('valid');
+    const verification = verifyWebhook({
+      headers: { ...headers },
+      body: BODY,
+      secrets: [secret],
+      now: NOW,
+    });
+    expect(verification.kind).toBe('valid');
   });
 });

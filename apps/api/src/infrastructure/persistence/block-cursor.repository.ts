@@ -19,6 +19,7 @@ export interface BlockCursor {
   readonly haltedAt: Date | null;
   readonly haltedReason: string | null;
   readonly fencingToken: bigint;
+  readonly updatedAt: Date;
 }
 
 interface CursorRow {
@@ -31,6 +32,7 @@ interface CursorRow {
   readonly halted_at: Date | null;
   readonly halted_reason: string | null;
   readonly fencing_token: string;
+  readonly updated_at: Date;
 }
 
 function toCursor(row: CursorRow): BlockCursor {
@@ -44,12 +46,13 @@ function toCursor(row: CursorRow): BlockCursor {
     haltedAt: row.halted_at,
     haltedReason: row.halted_reason,
     fencingToken: BigInt(row.fencing_token),
+    updatedAt: row.updated_at,
   });
 }
 
 const CURSOR_COLUMNS = `network_identifier, last_scanned_height, last_scanned_reference,
   finalized_height, current_scan_range, consecutive_successes, halted_at, halted_reason,
-  fencing_token`;
+  fencing_token, updated_at`;
 
 export class BlockCursorRepository {
   private readonly pool: Pool;

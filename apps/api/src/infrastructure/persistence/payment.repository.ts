@@ -1,4 +1,9 @@
-import type { Environment, NetworkIdentifier, PaymentStatus } from '@cryptopay/shared';
+import type {
+  Environment,
+  NetworkIdentifier,
+  PaymentStatus,
+  PaymentStatusChange,
+} from '@cryptopay/shared';
 import type { Pool, PoolClient } from 'pg';
 
 import type { Payment } from '../../domain/payment.js';
@@ -353,6 +358,33 @@ export class PaymentRepository {
       ],
     );
     return (result.rowCount ?? 0) > 0;
+  }
+
+  /**
+   * The audit trail as it was written. Presented straight through rather than reconstructed, because
+   * a timeline derived from the current state is a timeline that agrees with itself by construction
+   * and can never show that something went wrong.
+   */
+  async timelineFor(paymentId: string): Promise<readonly PaymentStatusChange[]> {
+    const result = await this.pool.query<{
+      from_status: PaymentStatus;
+      to_status: PaymentStatus;
+      command: string;
+      caused_by: string | null;
+      to_version: number;
+      occurred_at: Date;
+    }>(
+      `SELECT from_status, to_status, command, caused_by, to_version, occurred_at
+         FROM payment_status_transitions WHERE payment_id = $1 ORDER BY to_version`,
+      [paymentId],
+    );
+    return result.rows.map((row) => ({
+      fromStatus: row.from_status,
+      toStatus: row.to_status,
+      trigger: row.caused_by ?? row.command,
+      statusVersion: row.to_version,
+      occurredAt: row.occurred_at.toISOString(),
+    }));
   }
 
   async list(filter: PaymentListFilter): Promise<PaymentPage> {

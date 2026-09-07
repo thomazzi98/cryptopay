@@ -17,9 +17,15 @@ import {
   toProblemDetails,
   toUnexpectedProblemDetails,
 } from './problem-details.js';
+import type { BlockCursorRepository } from '../infrastructure/persistence/block-cursor.repository.js';
+import type { PaymentTransferRepository } from '../infrastructure/persistence/payment-transfer.repository.js';
+import type { WebhookDeliveryRepository } from '../infrastructure/persistence/webhook-delivery.repository.js';
+import type { WebhookSecretRepository } from '../infrastructure/persistence/webhook-secret.repository.js';
+import type { UlidFactory } from '../infrastructure/system/ulid.js';
 import { registerHealthRoutes } from './routes/health.routes.js';
 import { registerMerchantRoutes } from './routes/merchants.routes.js';
 import { registerPaymentRoutes } from './routes/payments.routes.js';
+import { registerWebhookRoutes } from './routes/webhooks.routes.js';
 import type { ApplicationServer } from './server-types.js';
 
 export interface ServerDependencies {
@@ -30,6 +36,11 @@ export interface ServerDependencies {
   readonly idempotencyRepository: IdempotencyRepository;
   readonly paymentCreator: CreatePaymentUseCase;
   readonly paymentCanceler: CancelPaymentUseCase;
+  readonly paymentTransferRepository: PaymentTransferRepository;
+  readonly webhookDeliveryRepository: WebhookDeliveryRepository;
+  readonly webhookSecretRepository: WebhookSecretRepository;
+  readonly blockCursorRepository: BlockCursorRepository;
+  readonly ulidFactory: UlidFactory;
 }
 
 const MAXIMUM_SUPPLIED_REQUEST_ID_LENGTH = 128;
@@ -177,6 +188,8 @@ export function buildServer(dependencies: ServerDependencies): ApplicationServer
   registerHealthRoutes(server, {
     startedAtMilliseconds: Date.now(),
     callbackSsrfPolicy: callbackSsrfPolicy(configuration),
+    blockCursorRepository: dependencies.blockCursorRepository,
+    now: () => new Date(),
   });
   registerMerchantRoutes(server, { merchantRepository, authenticate });
   registerPaymentRoutes(server, {
@@ -187,6 +200,15 @@ export function buildServer(dependencies: ServerDependencies): ApplicationServer
     merchantRepository,
     idempotencyRepository: dependencies.idempotencyRepository,
     checkoutBaseUrl: configuration.publicCheckoutBaseUrl,
+    paymentTransferRepository: dependencies.paymentTransferRepository,
+    webhookDeliveryRepository: dependencies.webhookDeliveryRepository,
+  });
+  registerWebhookRoutes(server, {
+    authenticate,
+    webhookDeliveryRepository: dependencies.webhookDeliveryRepository,
+    webhookSecretRepository: dependencies.webhookSecretRepository,
+    ulidFactory: dependencies.ulidFactory,
+    now: () => new Date(),
   });
 
   return server;

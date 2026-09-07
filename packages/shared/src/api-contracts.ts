@@ -331,6 +331,82 @@ export const TransactionHintRequestSchema = z
       'A latency optimisation only. The hint schedules a scan of that block; the amount, asset, recipient and confirmations are always re-derived from the chain, so a fabricated hash changes nothing.',
   });
 
+export const WebhookDeliveryStatusSchema = z
+  .enum(['pending', 'in_flight', 'delivered', 'failed', 'abandoned'])
+  .meta({ id: 'WebhookDeliveryStatus' });
+
+export const WebhookAttemptOutcomeSchema = z
+  .enum(['delivered', 'retryable', 'permanent', 'blocked', 'timeout'])
+  .meta({ id: 'WebhookAttemptOutcome' });
+
+export const WebhookAttemptSchema = z
+  .object({
+    attemptNumber: z.number().int().positive(),
+    outcome: WebhookAttemptOutcomeSchema,
+    responseStatus: z.number().int().nullable(),
+    /** The address the request was pinned to. A different one next attempt is worth investigating. */
+    resolvedAddress: z.string().nullable(),
+    responseSnippet: z.string().nullable(),
+    durationMilliseconds: z.number().int().min(0),
+    failureReason: z.string().nullable(),
+    /** True when a development allowlist entry is what permitted this attempt, never applied silently. */
+    usedPrivateAllowlist: z.boolean(),
+    requestedAt: z.iso.datetime(),
+  })
+  .meta({ id: 'WebhookAttempt' });
+
+export const WebhookDeliverySchema = z
+  .object({
+    identifier: WebhookDeliveryIdentifierSchema,
+    paymentIdentifier: PaymentIdentifierSchema,
+    eventType: z.string(),
+    destinationUrl: z.string(),
+    status: WebhookDeliveryStatusSchema,
+    attemptCount: z.number().int().min(0),
+    nextAttemptAt: z.iso.datetime().nullable(),
+    deliveredAt: z.iso.datetime().nullable(),
+    lastFailure: z.string().nullable(),
+    createdAt: z.iso.datetime(),
+    attempts: z.array(WebhookAttemptSchema),
+  })
+  .meta({
+    id: 'WebhookDelivery',
+    description:
+      'One notification of one payment event. The identifier is also the webhook-id header, and it never changes across retries or a redelivery, so a merchant can deduplicate on it.',
+  });
+
+export const WebhookDeliveryListSchema = z
+  .object({
+    data: z.array(WebhookDeliverySchema),
+    hasMore: z.boolean(),
+    nextCursor: z.string().nullable(),
+  })
+  .meta({ id: 'WebhookDeliveryList' });
+
+export const ListWebhookDeliveriesQuerySchema = z
+  .object({
+    status: WebhookDeliveryStatusSchema.optional(),
+    paymentIdentifier: PaymentIdentifierSchema.optional(),
+    limit: z.coerce.number().int().min(1).max(100).default(25),
+    startingAfter: WebhookDeliveryIdentifierSchema.optional(),
+  })
+  .meta({ id: 'ListWebhookDeliveriesQuery' });
+
+export const WebhookSecretSchema = z
+  .object({
+    identifier: z.string(),
+    /** Shown once, at creation. Afterwards only the prefix is ever returned. */
+    secret: z.string().nullable(),
+    hint: z.string(),
+    createdAt: z.iso.datetime(),
+    retiredAt: z.iso.datetime().nullable(),
+  })
+  .meta({
+    id: 'WebhookSecret',
+    description:
+      'A signing secret. Rotation is by overlap: both secrets sign during the grace period, so an endpoint that has not been updated yet keeps verifying.',
+  });
+
 export const ValidationIssueSchema = z
   .object({ path: z.string(), message: z.string() })
   .meta({ id: 'ValidationIssue' });
@@ -395,6 +471,10 @@ export type TransactionHintRequest = z.infer<typeof TransactionHintRequestSchema
 export type ProblemDetails = z.infer<typeof ProblemDetailsSchema>;
 export type NetworkDescriptor = z.infer<typeof NetworkDescriptorSchema>;
 export type Merchant = z.infer<typeof MerchantSchema>;
+export type WebhookDelivery = z.infer<typeof WebhookDeliverySchema>;
+export type WebhookDeliveryList = z.infer<typeof WebhookDeliveryListSchema>;
+export type WebhookAttempt = z.infer<typeof WebhookAttemptSchema>;
+export type WebhookSecret = z.infer<typeof WebhookSecretSchema>;
 export type Amount = z.infer<typeof AmountSchema>;
 export type Asset = z.infer<typeof AssetSchema>;
 export type Metadata = z.infer<typeof MetadataSchema>;

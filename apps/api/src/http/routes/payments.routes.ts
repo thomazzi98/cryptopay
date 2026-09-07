@@ -6,6 +6,8 @@ import {
   type PaymentList,
 } from '@cryptopay/shared';
 
+import type { FastifyRequest } from 'fastify';
+
 import type { CancelPaymentUseCase } from '../../application/cancel-payment.use-case.js';
 import type {
   CreatePaymentFailure,
@@ -15,8 +17,10 @@ import { MissingWalletSeedError } from '../../infrastructure/wallet/allocator-pr
 import type { IdempotencyRepository } from '../../infrastructure/persistence/idempotency.repository.js';
 import type { MerchantRepository } from '../../infrastructure/persistence/merchant.repository.js';
 import type { PaymentRepository } from '../../infrastructure/persistence/payment.repository.js';
+import type { PaymentTransferRepository } from '../../infrastructure/persistence/payment-transfer.repository.js';
+import type { WebhookDeliveryRepository } from '../../infrastructure/persistence/webhook-delivery.repository.js';
 import { requireMerchant, type AuthenticationHook } from '../authentication.js';
-import { presentPayment } from '../presenters/payment.presenter.js';
+import { presentPayment, presentTransfer } from '../presenters/payment.presenter.js';
 import { ApplicationError, type ProblemCode } from '../problem-details.js';
 import type { ApplicationServer } from '../server-types.js';
 
@@ -36,6 +40,8 @@ export interface PaymentRouteDependencies {
   readonly merchantRepository: MerchantRepository;
   readonly idempotencyRepository: IdempotencyRepository;
   readonly checkoutBaseUrl: string;
+  readonly paymentTransferRepository: PaymentTransferRepository;
+  readonly webhookDeliveryRepository: WebhookDeliveryRepository;
 }
 
 const FAILURE_CODES: Readonly<Record<CreatePaymentFailure['reason'], ProblemCode>> = Object.freeze({
@@ -64,6 +70,23 @@ export function registerPaymentRoutes(
   dependencies: PaymentRouteDependencies,
 ): void {
   const context = { checkoutBaseUrl: dependencies.checkoutBaseUrl };
+
+  /**
+   * Scoped by merchant in the query rather than checked afterwards, so a missing payment and another
+   * merchant's payment are indistinguishable and both answer 404. A 403 would confirm the identifier
+   * exists, which is all an enumeration attack needs.
+   */
+  async function requireOwnedPayment(request: FastifyRequest, paymentId: string) {
+    const authenticated = requireMerchant(request);
+    const payment = await dependencies.paymentRepository.findById(
+      authenticated.merchantId,
+      paymentId,
+    );
+    if (payment === null) {
+      throw new ApplicationError('resource_not_found', 'No such payment.');
+    }
+    return payment;
+  }
 
   server.post('/v1/payments', { preHandler: dependencies.authenticate }, async (request, reply) => {
     const authenticated = requireMerchant(request);
@@ -214,6 +237,63 @@ export function registerPaymentRoutes(
         throw new ApplicationError('resource_not_found', 'No such payment.');
       }
       await reply.code(200).send(presentPayment(payment, context));
+    },
+  );
+
+  /**
+   * Every transfer ever seen for this payment, orphaned ones included.
+   *
+   * Nothing is filtered out. A customer whose money was withdrawn by a reorg, or who sent the wrong
+   * token to the right address, needs that to be visible; a list that quietly omits it leaves support
+   * with nothing to say.
+   */
+  server.get<{ Params: { paymentId: string } }>(
+    '/v1/payments/:paymentId/transfers',
+    { preHandler: dependencies.authenticate },
+    async (request, reply) => {
+      const payment = await requireOwnedPayment(request, request.params.paymentId);
+      const transfers = await dependencies.paymentTransferRepository.findByPayment(
+        payment.identifier,
+      );
+      await reply.code(200).send({
+        data: transfers.map((transfer) =>
+          presentTransfer(transfer, payment.networkIdentifier, payment.asset.decimals),
+        ),
+      });
+    },
+  );
+
+  /** The audit trail exactly as it was written, which is what makes the timeline trustworthy. */
+  server.get<{ Params: { paymentId: string } }>(
+    '/v1/payments/:paymentId/timeline',
+    { preHandler: dependencies.authenticate },
+    async (request, reply) => {
+      const payment = await requireOwnedPayment(request, request.params.paymentId);
+      const changes = await dependencies.paymentRepository.timelineFor(payment.identifier);
+      await reply.code(200).send({ data: changes });
+    },
+  );
+
+  server.get<{ Params: { paymentId: string } }>(
+    '/v1/payments/:paymentId/deliveries',
+    { preHandler: dependencies.authenticate },
+    async (request, reply) => {
+      const payment = await requireOwnedPayment(request, request.params.paymentId);
+      const deliveries = await dependencies.webhookDeliveryRepository.findByPayment(
+        payment.identifier,
+      );
+      await reply.code(200).send({
+        data: deliveries.map((delivery) => ({
+          identifier: delivery.identifier,
+          eventType: delivery.eventType,
+          destinationUrl: delivery.destinationUrl,
+          status: delivery.status,
+          attemptCount: delivery.attemptCount,
+          deliveredAt: delivery.deliveredAt?.toISOString() ?? null,
+          lastFailure: delivery.lastFailure,
+          createdAt: delivery.createdAt.toISOString(),
+        })),
+      });
     },
   );
 

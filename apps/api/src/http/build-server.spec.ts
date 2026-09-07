@@ -43,23 +43,32 @@ describe('the HTTP server', () => {
     expect(response.json()).toStrictEqual({ status: 'ok' });
   });
 
-  it('reports readiness with a per-component breakdown', async () => {
+  /**
+   * Readiness genuinely depends on the database, so a server built against one it cannot reach must
+   * answer 503 and say which component failed. Reporting ready while unable to read a block cursor
+   * would route traffic to an instance that cannot detect a single payment.
+   */
+  it('refuses readiness when the database cannot be reached, and says so', async () => {
     const response = await server.inject({ method: 'GET', url: '/readyz' });
-    expect(response.statusCode).toBe(200);
+    expect(response.statusCode).toBe(503);
 
     const body = response.json<{
       status: string;
       callbackSsrfPolicy: string;
       components: { name: string; status: string }[];
     }>();
-    expect(body.status).toBe('ok');
+    expect(body.status).toBe('failed');
     expect(body.callbackSsrfPolicy).toBe('strict');
     expect(body.components.map((component) => component.name)).toContain('configuration');
+    expect(body.components.find((component) => component.name === 'database')?.status).toBe(
+      'failed',
+    );
   });
 
   it('surfaces a relaxed SSRF policy in readiness, so it cannot go unnoticed', async () => {
     const relaxed = createServer({ CALLBACK_PRIVATE_DESTINATION_ALLOWLIST: '127.0.0.1:4001' });
     const response = await relaxed.inject({ method: 'GET', url: '/readyz' });
+    // Reported whatever the rest of readiness says, because the point is that it cannot go unnoticed.
     expect(response.json<{ callbackSsrfPolicy: string }>().callbackSsrfPolicy).toBe('relaxed');
     await relaxed.close();
   });

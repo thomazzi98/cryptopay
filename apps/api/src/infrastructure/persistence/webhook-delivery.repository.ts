@@ -97,6 +97,21 @@ interface AttemptRow {
   readonly requested_at: Date;
 }
 
+export interface DeliveryListFilter {
+  readonly merchantId: string;
+  readonly environment: Environment;
+  readonly status?: DeliveryStatus;
+  readonly paymentId?: string;
+  readonly limit: number;
+  readonly startingAfter?: string;
+}
+
+export interface DeliveryPage {
+  readonly deliveries: readonly WebhookDelivery[];
+  readonly hasMore: boolean;
+  readonly nextCursor: string | null;
+}
+
 export class WebhookDeliveryRepository {
   private readonly pool: Pool;
 
@@ -261,6 +276,43 @@ export class WebhookDeliveryRepository {
         WHERE status = 'in_flight' AND claim_expires_at < now()`,
     );
     return result.rowCount ?? 0;
+  }
+
+  /** Cursor pagination on the identifier, which sorts by creation because it is a ULID. */
+  async list(filter: DeliveryListFilter): Promise<DeliveryPage> {
+    const conditions = ['merchant_id = $1', 'environment = $2::environment_name'];
+    const values: unknown[] = [filter.merchantId, filter.environment];
+
+    if (filter.status !== undefined) {
+      values.push(filter.status);
+      conditions.push(`status = $${values.length.toString()}::webhook_delivery_status`);
+    }
+    if (filter.paymentId !== undefined) {
+      values.push(filter.paymentId);
+      conditions.push(`payment_id = $${values.length.toString()}`);
+    }
+    if (filter.startingAfter !== undefined) {
+      values.push(filter.startingAfter);
+      conditions.push(`id < $${values.length.toString()}`);
+    }
+
+    // One more than asked for, so "is there another page" is answered without a second count query.
+    values.push(filter.limit + 1);
+    const result = await this.pool.query<DeliveryRow>(
+      `SELECT ${DELIVERY_COLUMNS} FROM webhook_deliveries
+        WHERE ${conditions.join(' AND ')}
+        ORDER BY id DESC
+        LIMIT $${values.length.toString()}`,
+      values,
+    );
+
+    const hasMore = result.rows.length > filter.limit;
+    const rows = hasMore ? result.rows.slice(0, filter.limit) : result.rows;
+    return {
+      deliveries: rows.map((row) => toDelivery(row)),
+      hasMore,
+      nextCursor: hasMore ? (rows.at(-1)?.id ?? null) : null,
+    };
   }
 
   async findByPayment(paymentId: string): Promise<readonly WebhookDelivery[]> {
