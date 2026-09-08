@@ -94,6 +94,7 @@ export function buildApplicationServer(
   const webhookDeliveryRepository = new WebhookDeliveryRepository(databasePool);
   const webhookSecretRepository = new WebhookSecretRepository(databasePool);
   const evaluationQueueRepository = new EvaluationQueueRepository(databasePool);
+  const settlementRepository = new SettlementRepository(databasePool);
 
   const walletAllocators = new WalletAllocatorProvider(
     walletSeedRepository,
@@ -141,6 +142,7 @@ export function buildApplicationServer(
     blockCursorRepository,
     ulidFactory,
     evaluationQueueRepository,
+    settlementRepository,
   });
 }
 
@@ -369,6 +371,7 @@ export async function composeSettlementWorker(
 
       return new SettlementWorker({
         networkIdentifier: network.networkIdentifier,
+        environment: network.environment,
         broadcaster,
         settler: new SettlePaymentsUseCase({
           networkIdentifier: network.networkIdentifier,

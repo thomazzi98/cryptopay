@@ -18,7 +18,7 @@ import { PaymentSchema } from './api-contracts.js';
 
 type JsonSchema = Record<string, unknown>;
 
-export type HttpMethod = 'get' | 'post' | 'delete';
+export type HttpMethod = 'get' | 'post' | 'put' | 'delete';
 
 export interface DocumentedOperation {
   readonly method: HttpMethod;
@@ -67,6 +67,7 @@ export interface OpenApiOptions {
 const REQUEST_SCHEMA_IDS: ReadonlySet<string> = new Set([
   'CreatePaymentRequest',
   'TransactionHintRequest',
+  'SetPayoutDestinationRequest',
   'ListPaymentsQuery',
   'ListWebhookDeliveriesQuery',
 ]);
@@ -331,6 +332,82 @@ const OPERATIONS: readonly OperationDefinition[] = [
       UNAUTHORIZED,
       NOT_FOUND,
       problem(422, 'The payment has received funds or has already finished.'),
+    ],
+  },
+  {
+    method: 'get',
+    path: '/v1/settlements',
+    operationId: 'listSettlements',
+    tag: 'Settlement',
+    summary: 'Where the money went',
+    description:
+      'One settlement per payment, with every transaction this system signed to move it and what each cost. Newest first.',
+    authenticated: true,
+    responses: [
+      { status: 200, description: 'The settlements.', schema: 'SettlementList' },
+      UNAUTHORIZED,
+    ],
+  },
+  {
+    method: 'get',
+    path: '/v1/payments/{paymentId}/settlement',
+    operationId: 'getPaymentSettlement',
+    tag: 'Settlement',
+    summary: 'The settlement for one payment',
+    description:
+      'A payment has at most one settlement, ever. That is a unique key in the database rather than a rule in the code, and it is what makes paying a merchant twice for one payment impossible.',
+    authenticated: true,
+    parameters: [IDENTIFIER_PARAMETER('paymentId', 'Identifier of the payment.')],
+    responses: [
+      { status: 200, description: 'The settlement.', schema: 'Settlement' },
+      UNAUTHORIZED,
+      problem(404, 'No settlement exists for that payment yet.'),
+    ],
+  },
+  {
+    method: 'get',
+    path: '/v1/treasury',
+    operationId: 'getTreasury',
+    tag: 'Settlement',
+    summary: 'What this deployment can spend, and what it has spent',
+    description:
+      'The account that pays for gas, the balance it was last seen holding, and the spend ceiling. The ceiling is enforced before anything is signed, not reported afterwards: a settlement that would cross it fails rather than broadcasting.',
+    authenticated: true,
+    responses: [
+      { status: 200, description: 'One report per network.', schema: 'TreasuryReportList' },
+      UNAUTHORIZED,
+    ],
+  },
+  {
+    method: 'get',
+    path: '/v1/payout-destinations',
+    operationId: 'listPayoutDestinations',
+    tag: 'Settlement',
+    summary: 'Where settled funds are sent',
+    description: 'One destination per network. A network with none configured is never swept.',
+    authenticated: true,
+    responses: [
+      { status: 200, description: 'The destinations.', schema: 'PayoutDestinationList' },
+      UNAUTHORIZED,
+    ],
+  },
+  {
+    method: 'put',
+    path: '/v1/payout-destinations/{network}',
+    operationId: 'setPayoutDestination',
+    tag: 'Settlement',
+    summary: 'Set where settled funds are sent',
+    description:
+      'Per network, deliberately. An address you control on one chain is not necessarily yours on another, and defaulting one network from another is how funds reach an account nobody can open.',
+    authenticated: true,
+    parameters: [
+      IDENTIFIER_PARAMETER('network', 'The network identifier, for example polygon-mainnet.'),
+    ],
+    requestBody: 'SetPayoutDestinationRequest',
+    responses: [
+      { status: 200, description: 'The destination now in force.', schema: 'PayoutDestination' },
+      UNAUTHORIZED,
+      problem(422, 'Unknown network, an address that is not lowercase, or the wrong environment.'),
     ],
   },
   {
@@ -624,6 +701,7 @@ export function buildOpenApiDocument(options: OpenApiOptions): Record<string, un
       { name: 'Webhooks', description: 'Deliveries, redelivery, and signing secrets.' },
       { name: 'Checkout', description: 'The unauthenticated surface the customer page uses.' },
       { name: 'Networks', description: 'What this deployment can accept, as data.' },
+      { name: 'Settlement', description: 'Moving credited funds to a merchant payout account.' },
       { name: 'Merchants', description: 'The merchant behind the API key.' },
       { name: 'Operations', description: 'Probes and this document.' },
     ],

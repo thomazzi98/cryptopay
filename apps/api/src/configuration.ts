@@ -1,4 +1,8 @@
-import type { NetworkIdentifier } from '@cryptopay/shared';
+import {
+  parseAmountToBaseUnits,
+  POLYGON_NATIVE_CURRENCY_DECIMALS,
+  type NetworkIdentifier,
+} from '@cryptopay/shared';
 import { z } from 'zod';
 
 /**
@@ -111,6 +115,40 @@ const ConfigurationSchema = z
       .regex(/^0x[\da-f]{40}$/, 'Expected a lowercase 0x-prefixed address')
       .optional(),
 
+    /**
+     * Whether this deployment may sign and broadcast at all.
+     *
+     * Off by default, and deliberately a separate switch from having RPC endpoints configured. A
+     * deployment that scans and notifies is useful on its own; one that can also move money is a
+     * different risk profile, and turning it on should be a decision somebody made rather than a
+     * consequence of filling in a URL.
+     */
+    settlementEnabled: z
+      .enum(['true', 'false'])
+      .default('false')
+      .transform((value) => value === 'true'),
+
+    /**
+     * The most native currency each network may ever spend, as a decimal string in whole units.
+     *
+     * This bounds the blast radius of a bug or a compromise by amount, which nothing else in the
+     * system does. An empty value means no ceiling, which is refused in production below: an
+     * unbounded signer in production is a decision nobody should be able to make by leaving a
+     * variable blank.
+     */
+    polygonMainnetSpendCeiling: z.string().optional(),
+    polygonAmoySpendCeiling: z.string().optional(),
+    localAnvilSpendCeiling: z.string().optional(),
+
+    settlementPollIntervalMilliseconds: z.coerce
+      .number()
+      .int()
+      .min(1000)
+      .max(300_000)
+      .default(15_000),
+    settlementMaximumAttempts: z.coerce.number().int().min(1).max(20).default(5),
+    settlementRetryBackoffSeconds: z.coerce.number().int().min(10).max(86_400).default(300),
+
     scannerPollIntervalMilliseconds: z.coerce.number().int().min(100).max(60_000).default(4000),
     /**
      * How long a scanner lease survives without renewal. Long enough that an ordinary pause does not
@@ -134,6 +172,40 @@ const ConfigurationSchema = z
       .default([]),
   })
   .superRefine((configuration, context) => {
+    for (const [field, value] of [
+      ['polygonMainnetSpendCeiling', configuration.polygonMainnetSpendCeiling],
+      ['polygonAmoySpendCeiling', configuration.polygonAmoySpendCeiling],
+      ['localAnvilSpendCeiling', configuration.localAnvilSpendCeiling],
+    ] as const) {
+      if (value === undefined) {
+        continue;
+      }
+      try {
+        parseAmountToBaseUnits(value, POLYGON_NATIVE_CURRENCY_DECIMALS);
+      } catch {
+        context.addIssue({
+          code: 'custom',
+          path: [field],
+          message: `Expected a decimal amount of native currency, for example "0.5". Received "${value}".`,
+        });
+      }
+    }
+
+    // A signer with no ceiling is a signer with no upper bound on what a bug can spend. Development
+    // may run without one; production may not, and the process refuses rather than warns.
+    if (
+      configuration.nodeEnvironment === 'production' &&
+      configuration.settlementEnabled &&
+      configuration.polygonMainnetSpendCeiling === undefined
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['polygonMainnetSpendCeiling'],
+        message:
+          'POLYGON_MAINNET_SPEND_CEILING must be set when settlement is enabled in production. Refusing to start a signer with no upper bound on what it can spend.',
+      });
+    }
+
     if (
       configuration.nodeEnvironment === 'production' &&
       configuration.callbackPrivateDestinationAllowlist.length > 0
@@ -179,6 +251,13 @@ export function loadConfiguration(source: EnvironmentSource): Configuration {
     polygonAmoyWalletRpcUrl: optionalText(source.POLYGON_AMOY_WALLET_RPC_URL),
     localAnvilWalletRpcUrl: optionalText(source.LOCAL_ANVIL_WALLET_RPC_URL),
     localAnvilUsdcAddress: optionalText(source.LOCAL_ANVIL_USDC_ADDRESS),
+    settlementEnabled: optionalText(source.SETTLEMENT_ENABLED),
+    polygonMainnetSpendCeiling: optionalText(source.POLYGON_MAINNET_SPEND_CEILING),
+    polygonAmoySpendCeiling: optionalText(source.POLYGON_AMOY_SPEND_CEILING),
+    localAnvilSpendCeiling: optionalText(source.LOCAL_ANVIL_SPEND_CEILING),
+    settlementPollIntervalMilliseconds: source.SETTLEMENT_POLL_INTERVAL_MILLISECONDS,
+    settlementMaximumAttempts: source.SETTLEMENT_MAXIMUM_ATTEMPTS,
+    settlementRetryBackoffSeconds: source.SETTLEMENT_RETRY_BACKOFF_SECONDS,
     scannerPollIntervalMilliseconds: source.SCANNER_POLL_INTERVAL_MILLISECONDS,
     scannerLeaseSeconds: source.SCANNER_LEASE_SECONDS,
     callbackPrivateDestinationAllowlist: parseCommaSeparated(
@@ -210,6 +289,28 @@ export function rpcUrlsFor(
     'local-anvil': configuration.localAnvilRpcUrls,
   };
   return byNetwork[network];
+}
+
+/**
+ * The most native currency this network may spend, in base units, or null when unbounded.
+ *
+ * Configured in whole units because that is how an operator thinks about a budget, and converted
+ * once, here, so no caller has to remember how many decimals the native currency has.
+ */
+export function spendCeilingFor(
+  configuration: Configuration,
+  network: NetworkIdentifier,
+): bigint | null {
+  const byNetwork: Record<NetworkIdentifier, string | undefined> = {
+    'polygon-mainnet': configuration.polygonMainnetSpendCeiling,
+    'polygon-amoy': configuration.polygonAmoySpendCeiling,
+    'local-anvil': configuration.localAnvilSpendCeiling,
+  };
+  const configured = byNetwork[network];
+  if (configured === undefined) {
+    return null;
+  }
+  return parseAmountToBaseUnits(configured, POLYGON_NATIVE_CURRENCY_DECIMALS);
 }
 
 /**

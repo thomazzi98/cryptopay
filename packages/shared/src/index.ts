@@ -12,3 +12,4 @@ export * from './openapi.js';
 export * from './payment-state-machine.js';
 export * from './payment-status.js';
 export * from './payment-transition-table.js';
+export * from './settlement-status.js';

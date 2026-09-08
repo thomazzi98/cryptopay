@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 import { NETWORK_IDENTIFIERS } from './ledger-primitives.js';
 import { PAYMENT_STATUSES } from './payment-status.js';
+import { SETTLEMENT_STATUSES } from './settlement-status.js';
 
 /**
  * The API contract, declared once. The server validates requests with these schemas, the OpenAPI
@@ -444,6 +445,132 @@ export const NetworkDescriptorSchema = z
   })
   .meta({ id: 'NetworkDescriptor' });
 
+export const SettlementStatusSchema = z
+  .enum(SETTLEMENT_STATUSES as unknown as [string, ...string[]])
+  .meta({
+    id: 'SettlementStatus',
+    description:
+      'Where the outbound half of a payment has reached. Separate from the payment status, which a failed sweep must never be able to make uncertain again.',
+  });
+
+export const ChainTransactionSchema = z
+  .object({
+    purpose: z.enum(['gas_funding', 'asset_sweep']).meta({
+      description:
+        'A deposit address holds no native currency, so it cannot pay for its own transfer. The treasury funds it first; that is gas_funding.',
+    }),
+    status: z.enum(['submitted', 'confirming', 'confirmed', 'reverted', 'dropped', 'replaced']),
+    sourceAccount: AccountSchema,
+    destinationAccount: AccountSchema,
+    transactionReference: TransactionReferenceSchema,
+    /** What an EVM chain calls a nonce. At most one live transaction per account may hold each. */
+    sequenceNumber: z.number().int().min(0),
+    valueInNativeUnits: z.string().regex(BASE_UNITS_PATTERN),
+    maximumFeeInNativeUnits: z.string().regex(BASE_UNITS_PATTERN).meta({
+      description: 'The upper bound computed before signing. The spend ceiling reasons on this.',
+    }),
+    feePaidInNativeUnits: z.string().regex(BASE_UNITS_PATTERN).nullable(),
+    computeUsed: z.string().regex(BASE_UNITS_PATTERN).nullable().meta({
+      description: 'Gas used, on an EVM chain.',
+    }),
+    feeParameters: z.record(z.string(), z.string()).meta({
+      description:
+        'The chain-specific fee fields exactly as signed. On an EVM chain: the gas limit and both EIP-1559 prices.',
+    }),
+    blockHeight: BlockHeightSchema.nullable(),
+    explorerUrl: z.url().nullable(),
+    failureReason: z.string().nullable(),
+    submittedAt: z.iso.datetime(),
+    confirmedAt: z.iso.datetime().nullable(),
+  })
+  .meta({
+    id: 'ChainTransaction',
+    description: 'One transaction this system signed and broadcast, and what became of it.',
+  });
+
+export const SettlementSchema = z
+  .object({
+    identifier: z.string(),
+    paymentIdentifier: PaymentIdentifierSchema,
+    network: NetworkIdentifierSchema,
+    environment: EnvironmentSchema,
+    status: SettlementStatusSchema,
+    sourceAccount: AccountSchema.meta({
+      description: 'The deposit address the customer paid into.',
+    }),
+    destinationAccount: AccountSchema.meta({ description: "The merchant's payout account." }),
+    asset: AssetSchema,
+    amount: AmountSchema.meta({
+      description:
+        'Read from the chain when the settlement was planned, not copied from the credited figure. The balance is what can actually move.',
+    }),
+    attemptCount: z.number().int().min(0),
+    failureReason: z.string().nullable(),
+    transactions: z.array(ChainTransactionSchema),
+    createdAt: z.iso.datetime(),
+    settledAt: z.iso.datetime().nullable(),
+  })
+  .meta({ id: 'Settlement' });
+
+export const SettlementListSchema = z
+  .object({
+    data: z.array(SettlementSchema),
+    hasMore: z.boolean(),
+    nextCursor: z.string().nullable(),
+  })
+  .meta({ id: 'SettlementList' });
+
+export const PayoutDestinationSchema = z
+  .object({
+    network: NetworkIdentifierSchema,
+    environment: EnvironmentSchema,
+    account: AccountSchema,
+    updatedAt: z.iso.datetime(),
+  })
+  .meta({
+    id: 'PayoutDestination',
+    description:
+      'Where settled funds are sent. Per network as well as per environment: an address you control on one chain is not necessarily yours on another.',
+  });
+
+export const PayoutDestinationListSchema = z
+  .object({ data: z.array(PayoutDestinationSchema) })
+  .meta({ id: 'PayoutDestinationList' });
+
+export const SetPayoutDestinationRequestSchema = z
+  .object({ account: AccountSchema })
+  .meta({ id: 'SetPayoutDestinationRequest' });
+
+export const TreasuryReportSchema = z
+  .object({
+    network: NetworkIdentifierSchema,
+    environment: EnvironmentSchema,
+    account: AccountSchema.meta({
+      description: 'The account that pays for gas. Fund this to let settlement run.',
+    }),
+    nativeCurrency: z.object({ symbol: z.string(), decimals: z.number().int() }),
+    balanceInNativeUnits: z.string().regex(BASE_UNITS_PATTERN).nullable().meta({
+      description: 'Null when no endpoint could be reached, which is not the same as zero.',
+    }),
+    /** Null means unbounded, which the API refuses to allow in production. */
+    ceilingInNativeUnits: z.string().regex(BASE_UNITS_PATTERN).nullable(),
+    committedInNativeUnits: z.string().regex(BASE_UNITS_PATTERN).meta({
+      description:
+        'Everything spent or promised: receipts where there are receipts, worst cases where there are not.',
+    }),
+    remainingInNativeUnits: z.string().regex(BASE_UNITS_PATTERN).nullable(),
+    settlementEnabled: z.boolean(),
+  })
+  .meta({
+    id: 'TreasuryReport',
+    description:
+      'What this deployment can spend on a network, and what it has spent. The ceiling is enforced before signing, not reported after.',
+  });
+
+export const TreasuryReportListSchema = z
+  .object({ data: z.array(TreasuryReportSchema) })
+  .meta({ id: 'TreasuryReportList' });
+
 /**
  * What a caller may hand to `POST /v1/payments`, as data.
  *
@@ -532,6 +659,13 @@ export type ProblemDetails = z.infer<typeof ProblemDetailsSchema>;
 export type NetworkDescriptor = z.infer<typeof NetworkDescriptorSchema>;
 export type Merchant = z.infer<typeof MerchantSchema>;
 export type NetworkList = z.infer<typeof NetworkListSchema>;
+export type Settlement = z.infer<typeof SettlementSchema>;
+export type SettlementList = z.infer<typeof SettlementListSchema>;
+export type ChainTransaction = z.infer<typeof ChainTransactionSchema>;
+export type PayoutDestination = z.infer<typeof PayoutDestinationSchema>;
+export type PayoutDestinationList = z.infer<typeof PayoutDestinationListSchema>;
+export type TreasuryReport = z.infer<typeof TreasuryReportSchema>;
+export type TreasuryReportList = z.infer<typeof TreasuryReportListSchema>;
 export type PaymentTransferList = z.infer<typeof PaymentTransferListSchema>;
 export type PaymentTimeline = z.infer<typeof PaymentTimelineSchema>;
 export type PaymentDeliverySummary = z.infer<typeof PaymentDeliverySummarySchema>;

@@ -142,6 +142,11 @@ services:
       # means a callback the API accepted is one the worker will refuse, which is the most confusing
       # shape this failure can take.
       CALLBACK_PRIVATE_DESTINATION_ALLOWLIST: ${CALLBACK_PRIVATE_DESTINATION_ALLOWLIST:-demo-receiver:8080}
+      # Read only by the API, to report the ceiling the settlement worker enforces. The API cannot
+      # sign and holds no key material; it says what the limit is, it does not apply it.
+      SETTLEMENT_ENABLED: ${SETTLEMENT_ENABLED:-false}
+      POLYGON_MAINNET_SPEND_CEILING: ${POLYGON_MAINNET_SPEND_CEILING:-}
+      POLYGON_AMOY_SPEND_CEILING: ${POLYGON_AMOY_SPEND_CEILING:-}
     depends_on:
       bootstrap:
         condition: service_completed_successfully
@@ -208,6 +213,39 @@ services:
     # payments, api_keys and wallet_seeds.
     networks: [internal, outbound]
     restart: unless-stopped
+
+  # The only process that can sign. It runs with the narrowest database role in the deployment and is
+  # reachable from nothing: no port, no ingress, and the internal network only because it needs the
+  # database and an RPC endpoint.
+  #
+  # Disabled by default. SETTLEMENT_ENABLED is a separate switch from having RPC endpoints on purpose:
+  # a deployment that watches and notifies is useful on its own, and one that can also move money is a
+  # different risk profile that somebody should have decided to accept.
+  settlement-worker:
+    build:
+      context: .
+      dockerfile: docker/api.Dockerfile
+    command: ['node', 'apps/api/dist/main.settlement-worker.js']
+    environment:
+      NODE_ENV: ${CRYPTOPAY_NODE_ENV:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      DATABASE_URL: postgresql://cryptopay_settlement_worker:cryptopay_settlement_local@postgres:5432/cryptopay
+      API_KEY_PEPPER: ${API_KEY_PEPPER:?}
+      WALLET_KEY_ENCRYPTION_KEY: ${WALLET_KEY_ENCRYPTION_KEY:?}
+      POLYGON_AMOY_RPC_URLS: ${POLYGON_AMOY_RPC_URLS:-}
+      POLYGON_MAINNET_RPC_URLS: ${POLYGON_MAINNET_RPC_URLS:-}
+      SETTLEMENT_ENABLED: ${SETTLEMENT_ENABLED:-false}
+      # The blast radius, in whole POL. Nothing else in this system bounds losses by amount, and the
+      # API refuses to start a production signer without one.
+      POLYGON_MAINNET_SPEND_CEILING: ${POLYGON_MAINNET_SPEND_CEILING:-}
+      POLYGON_AMOY_SPEND_CEILING: ${POLYGON_AMOY_SPEND_CEILING:-}
+      SETTLEMENT_POLL_INTERVAL_MILLISECONDS: ${SETTLEMENT_POLL_INTERVAL_MILLISECONDS:-15000}
+    depends_on:
+      bootstrap:
+        condition: service_completed_successfully
+    networks: [internal]
+    restart: unless-stopped
+    profiles: [settlement]
 
   web:
     build:

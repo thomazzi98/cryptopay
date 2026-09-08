@@ -30,6 +30,9 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'cryptopay_callback_worker') THEN
     CREATE ROLE cryptopay_callback_worker LOGIN PASSWORD 'cryptopay_callback_local';
   END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'cryptopay_settlement_worker') THEN
+    CREATE ROLE cryptopay_settlement_worker LOGIN PASSWORD 'cryptopay_settlement_local';
+  END IF;
 END
 $$;
 
@@ -59,7 +62,30 @@ GRANT SELECT, INSERT ON webhook_delivery_attempts TO cryptopay_callback_worker;
 GRANT SELECT ON webhook_secrets TO cryptopay_callback_worker;
 GRANT USAGE, SELECT ON SEQUENCE webhook_delivery_attempts_id_seq TO cryptopay_callback_worker;
 
+-- The settlement worker: the only role that may read a wallet seed, because it is the only process
+-- that signs. In exchange it gets nothing else it does not need — no API keys, no idempotency
+-- records, no webhook secrets, and no ability to change a payment's status.
+--
+-- Reading payment_addresses is what lets it derive the key for a deposit address. That pairing is
+-- the whole sensitivity of this role: the seed alone is useless without knowing which index holds
+-- money, and this is the one place both are visible.
+GRANT CONNECT ON DATABASE cryptopay TO cryptopay_settlement_worker;
+GRANT USAGE ON SCHEMA public TO cryptopay_settlement_worker;
+GRANT SELECT, INSERT, UPDATE ON settlements, chain_transactions, chain_accounts
+  TO cryptopay_settlement_worker;
+GRANT SELECT ON payments, payment_addresses, payout_destinations, merchants
+  TO cryptopay_settlement_worker;
+GRANT SELECT ON wallet_seeds TO cryptopay_settlement_worker;
+GRANT SELECT, INSERT, UPDATE ON leader_leases TO cryptopay_settlement_worker;
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO cryptopay_settlement_worker;
+
 -- Said explicitly rather than left to the absence of a grant, so a later default-privilege change
 -- cannot quietly hand the callback worker the payments table.
 REVOKE ALL ON payments, api_keys, wallet_seeds, payment_addresses FROM cryptopay_callback_worker;
 REVOKE ALL ON wallet_seeds, api_keys FROM cryptopay_chain_worker;
+REVOKE ALL ON api_keys, webhook_secrets, webhook_deliveries, idempotency_records
+  FROM cryptopay_settlement_worker;
+
+-- The settlement worker reads payments to find what is worth settling and must never change one.
+-- A sweep that failed cannot be allowed to make a completed payment uncertain again.
+REVOKE INSERT, UPDATE, DELETE ON payments FROM cryptopay_settlement_worker;

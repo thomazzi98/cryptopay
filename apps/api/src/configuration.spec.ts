@@ -5,6 +5,7 @@ import {
   ConfigurationError,
   type EnvironmentSource,
   loadConfiguration,
+  spendCeilingFor,
   walletRpcUrlFor,
 } from './configuration.js';
 
@@ -217,5 +218,57 @@ describe('optional settings left blank', () => {
     expect(() =>
       loadConfiguration({ ...REQUIRED, POLYGON_AMOY_WALLET_RPC_URL: 'not-a-url' }),
     ).toThrow(ConfigurationError);
+  });
+});
+
+/**
+ * Settlement is the only part of this system that can spend, so the configuration that governs it
+ * is checked the same way the SSRF combination is: the process refuses rather than warns.
+ */
+describe('settlement configuration', () => {
+  it('is off unless it is turned on', () => {
+    expect(load().settlementEnabled).toBe(false);
+    expect(load({ SETTLEMENT_ENABLED: 'true' }).settlementEnabled).toBe(true);
+  });
+
+  it('reads a ceiling in whole units and reports it in base units', () => {
+    const configuration = load({ POLYGON_MAINNET_SPEND_CEILING: '0.5' });
+    expect(spendCeilingFor(configuration, 'polygon-mainnet')).toBe(500_000_000_000_000_000n);
+  });
+
+  it('reports no ceiling for a network that has none', () => {
+    expect(spendCeilingFor(load(), 'polygon-amoy')).toBeNull();
+  });
+
+  it('refuses a ceiling that is not an amount', () => {
+    expect(() => load({ POLYGON_MAINNET_SPEND_CEILING: 'half a POL' })).toThrow(ConfigurationError);
+  });
+
+  /**
+   * The combination that matters. A production deployment that can sign and has no upper bound on
+   * what it can spend must not start, because the failure it guards against is unbounded.
+   */
+  it('refuses to start a production signer with no ceiling', () => {
+    expect(() =>
+      loadConfiguration({
+        ...REQUIRED,
+        NODE_ENV: 'production',
+        SETTLEMENT_ENABLED: 'true',
+      }),
+    ).toThrow(ConfigurationError);
+  });
+
+  it('starts a production signer that has a ceiling', () => {
+    const configuration = loadConfiguration({
+      ...REQUIRED,
+      NODE_ENV: 'production',
+      SETTLEMENT_ENABLED: 'true',
+      POLYGON_MAINNET_SPEND_CEILING: '0.5',
+    });
+    expect(configuration.settlementEnabled).toBe(true);
+  });
+
+  it('allows development to run a signer without one', () => {
+    expect(load({ SETTLEMENT_ENABLED: 'true' }).settlementEnabled).toBe(true);
   });
 });

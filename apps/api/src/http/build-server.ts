@@ -25,6 +25,7 @@ import {
 import type { BlockCursorRepository } from '../infrastructure/persistence/block-cursor.repository.js';
 import type { EvaluationQueueRepository } from '../infrastructure/persistence/evaluation-queue.repository.js';
 import type { PaymentTransferRepository } from '../infrastructure/persistence/payment-transfer.repository.js';
+import type { SettlementRepository } from '../infrastructure/persistence/settlement.repository.js';
 import type { WebhookDeliveryRepository } from '../infrastructure/persistence/webhook-delivery.repository.js';
 import type { WebhookSecretRepository } from '../infrastructure/persistence/webhook-secret.repository.js';
 import type { UlidFactory } from '../infrastructure/system/ulid.js';
@@ -33,6 +34,7 @@ import { registerHealthRoutes } from './routes/health.routes.js';
 import { registerMerchantRoutes } from './routes/merchants.routes.js';
 import { registerNetworkRoutes } from './routes/networks.routes.js';
 import { registerPaymentRoutes } from './routes/payments.routes.js';
+import { registerSettlementRoutes } from './routes/settlements.routes.js';
 import { registerWebhookRoutes } from './routes/webhooks.routes.js';
 import type { ApplicationServer } from './server-types.js';
 
@@ -50,6 +52,7 @@ export interface ServerDependencies {
   readonly blockCursorRepository: BlockCursorRepository;
   readonly ulidFactory: UlidFactory;
   readonly evaluationQueueRepository: EvaluationQueueRepository;
+  readonly settlementRepository: SettlementRepository;
 }
 
 const MAXIMUM_SUPPLIED_REQUEST_ID_LENGTH = 128;
@@ -232,6 +235,11 @@ export function buildServer(dependencies: ServerDependencies): ApplicationServer
     paymentTransferRepository: dependencies.paymentTransferRepository,
     merchantRepository,
     evaluationQueueRepository: dependencies.evaluationQueueRepository,
+  });
+  registerSettlementRoutes(server, {
+    authenticate,
+    configuration,
+    settlementRepository: dependencies.settlementRepository,
   });
   registerWebhookRoutes(server, {
     authenticate,
