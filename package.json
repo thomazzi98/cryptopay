@@ -36,7 +36,8 @@
     "test:integration": "vitest run --project api-integration",
     "test:all": "vitest run",
     "scan:secrets": "node scripts/scan-secrets.mjs",
-    "check:testnet-key": "node scripts/check-testnet-key.mjs"
+    "check:testnet-key": "node scripts/check-testnet-key.mjs",
+    "demo": "node scripts/demo.mjs"
   },
   "devDependencies": {
     "@commitlint/cli": "21.2.2",
@@ -46,6 +47,7 @@
     "@types/node": "24.13.3",
     "@vitest/coverage-v8": "4.1.11",
     "@vitest/eslint-plugin": "1.6.27",
+    "embedded-postgres": "18.4.0-beta.17",
     "eslint": "10.10.0",
     "eslint-config-prettier": "10.1.8",
     "eslint-plugin-unicorn": "74.0.0",
@@ -53,6 +55,7 @@
     "husky": "9.1.7",
     "knip": "6.34.0",
     "lint-staged": "17.5.0",
+    "pg": "8.23.0",
     "prettier": "3.9.6",
     "typescript": "6.0.3",
     "typescript-eslint": "8.69.0",

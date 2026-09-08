@@ -21,3 +21,6 @@ blob-report/
 Thumbs.db
 *.log
 npm-debug.log*
+
+# Ephemeral credentials for a local demo run. Never committed.
+.demo-*.tmp

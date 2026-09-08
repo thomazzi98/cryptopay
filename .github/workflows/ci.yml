@@ -36,6 +36,23 @@ jobs:
       - run: npm run knip
       - run: npm run docs:check
 
+  web:
+    name: Web build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      # The shared package is consumed from its build output, so it has to exist first.
+      - run: npm run build --workspace packages/shared
+      # A separate job because this is the only check that catches a class purged by Tailwind. The
+      # development server compiles on demand and looks correct; the failure appears only in a
+      # production build, which makes it exactly the kind of thing CI has to run.
+      - run: npm run build --workspace apps/web
+
   secrets:
     name: Secret scanning
     runs-on: ubuntu-latest
