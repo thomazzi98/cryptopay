@@ -5,6 +5,7 @@ import {
   ConfigurationError,
   type EnvironmentSource,
   loadConfiguration,
+  walletRpcUrlFor,
 } from './configuration.js';
 
 const REQUIRED: EnvironmentSource = {
@@ -174,5 +175,47 @@ describe('callbackSsrfPolicy', () => {
   it('reports relaxed when a destination is allowlisted, so readiness can surface it', () => {
     const configuration = load({ CALLBACK_PRIVATE_DESTINATION_ALLOWLIST: '127.0.0.1:4001' });
     expect(callbackSsrfPolicy(configuration)).toBe('relaxed');
+  });
+});
+
+/**
+ * Compose passes every variable it declares, so an optional setting left blank in `.env` arrives as
+ * an empty string. Refusing to start on one is a false alarm that reads like a bad value.
+ */
+describe('optional settings left blank', () => {
+  it('treats an empty wallet RPC URL as unset', () => {
+    const configuration = loadConfiguration({
+      ...REQUIRED,
+      POLYGON_MAINNET_WALLET_RPC_URL: '',
+      POLYGON_AMOY_WALLET_RPC_URL: ' '.repeat(3),
+    });
+    expect(walletRpcUrlFor(configuration, 'polygon-mainnet')).toBeNull();
+    expect(walletRpcUrlFor(configuration, 'polygon-amoy')).toBeNull();
+  });
+
+  it('falls back to the default base URLs rather than refusing on a blank one', () => {
+    const configuration = loadConfiguration({
+      ...REQUIRED,
+      PUBLIC_API_BASE_URL: '',
+      PUBLIC_CHECKOUT_BASE_URL: '',
+    });
+    expect(configuration.publicApiBaseUrl).toBe('http://localhost:3001');
+    expect(configuration.publicCheckoutBaseUrl).toBe('http://localhost:3000/pay');
+  });
+
+  it('still returns a configured wallet RPC URL', () => {
+    const configuration = loadConfiguration({
+      ...REQUIRED,
+      POLYGON_AMOY_WALLET_RPC_URL: 'https://rpc-amoy.polygon.technology',
+    });
+    expect(walletRpcUrlFor(configuration, 'polygon-amoy')).toBe(
+      'https://rpc-amoy.polygon.technology',
+    );
+  });
+
+  it('refuses a wallet RPC URL that is set to something that is not a URL', () => {
+    expect(() =>
+      loadConfiguration({ ...REQUIRED, POLYGON_AMOY_WALLET_RPC_URL: 'not-a-url' }),
+    ).toThrow(ConfigurationError);
   });
 });

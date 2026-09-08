@@ -13,6 +13,20 @@ import { z } from 'zod';
 
 const HOST_AND_PORT_PATTERN = /^[a-z\d.-]+:\d{1,5}$/;
 
+/**
+ * An unset variable and one set to nothing mean the same thing here.
+ *
+ * Compose passes every declared variable through, so an optional setting left blank in `.env` arrives
+ * as an empty string rather than as absent. Without this, a blank line refuses the whole process with
+ * "Invalid URL", which reads as a bad value rather than as no value.
+ */
+function optionalText(value: string | undefined): string | undefined {
+  if (value === undefined || value.trim() === '') {
+    return undefined;
+  }
+  return value.trim();
+}
+
 function parseCommaSeparated(value: string | undefined): string[] {
   if (value === undefined || value.trim() === '') {
     return [];
@@ -48,6 +62,9 @@ const ConfigurationSchema = z
     /** Where the hosted checkout is served from. Payment responses build their checkoutUrl on it. */
     publicCheckoutBaseUrl: z.url().default('http://localhost:3000/pay'),
 
+    /** The base URL the generated OpenAPI document advertises, so a generated client points at it. */
+    publicApiBaseUrl: z.url().default('http://localhost:3001'),
+
     /**
      * Wraps the data key that encrypts each environment's master seed. Whoever can read this value
      * can unwrap every unswept deposit key, which is the largest honest limitation of the current
@@ -78,6 +95,17 @@ const ConfigurationSchema = z
      * constant, because a token address that can be set at runtime is a way to redirect what a
      * payment credits; a development chain genuinely redeploys on every start.
      */
+    /**
+     * A keyless RPC URL per network, safe to hand to a wallet.
+     *
+     * Separate from the scanning endpoints on purpose. Those may carry a provider key in the path,
+     * and `GET /v1/networks` is read by browsers and by other people's servers, so returning one
+     * would publish it. A network with no entry here reports a null URL rather than a guess.
+     */
+    polygonMainnetWalletRpcUrl: z.url().optional(),
+    polygonAmoyWalletRpcUrl: z.url().optional(),
+    localAnvilWalletRpcUrl: z.url().optional(),
+
     localAnvilUsdcAddress: z
       .string()
       .regex(/^0x[\da-f]{40}$/, 'Expected a lowercase 0x-prefixed address')
@@ -141,12 +169,16 @@ export function loadConfiguration(source: EnvironmentSource): Configuration {
     logLevel: source.LOG_LEVEL,
     databaseUrl: source.DATABASE_URL,
     apiKeyPepper: source.API_KEY_PEPPER,
-    publicCheckoutBaseUrl: source.PUBLIC_CHECKOUT_BASE_URL,
+    publicCheckoutBaseUrl: optionalText(source.PUBLIC_CHECKOUT_BASE_URL),
+    publicApiBaseUrl: optionalText(source.PUBLIC_API_BASE_URL),
     walletKeyEncryptionKey: source.WALLET_KEY_ENCRYPTION_KEY,
     polygonMainnetRpcUrls: parseCommaSeparated(source.POLYGON_MAINNET_RPC_URLS),
     polygonAmoyRpcUrls: parseCommaSeparated(source.POLYGON_AMOY_RPC_URLS),
     localAnvilRpcUrls: parseCommaSeparated(source.LOCAL_ANVIL_RPC_URLS),
-    localAnvilUsdcAddress: source.LOCAL_ANVIL_USDC_ADDRESS,
+    polygonMainnetWalletRpcUrl: optionalText(source.POLYGON_MAINNET_WALLET_RPC_URL),
+    polygonAmoyWalletRpcUrl: optionalText(source.POLYGON_AMOY_WALLET_RPC_URL),
+    localAnvilWalletRpcUrl: optionalText(source.LOCAL_ANVIL_WALLET_RPC_URL),
+    localAnvilUsdcAddress: optionalText(source.LOCAL_ANVIL_USDC_ADDRESS),
     scannerPollIntervalMilliseconds: source.SCANNER_POLL_INTERVAL_MILLISECONDS,
     scannerLeaseSeconds: source.SCANNER_LEASE_SECONDS,
     callbackPrivateDestinationAllowlist: parseCommaSeparated(
@@ -178,6 +210,24 @@ export function rpcUrlsFor(
     'local-anvil': configuration.localAnvilRpcUrls,
   };
   return byNetwork[network];
+}
+
+/**
+ * The keyless RPC URL a wallet may be handed for this network, or null when none is configured.
+ *
+ * Deliberately never falls back to a scanning endpoint: those may carry a provider key, and this
+ * value is published to anyone holding an API key.
+ */
+export function walletRpcUrlFor(
+  configuration: Configuration,
+  network: NetworkIdentifier,
+): string | null {
+  const byNetwork: Record<NetworkIdentifier, string | undefined> = {
+    'polygon-mainnet': configuration.polygonMainnetWalletRpcUrl,
+    'polygon-amoy': configuration.polygonAmoyWalletRpcUrl,
+    'local-anvil': configuration.localAnvilWalletRpcUrl,
+  };
+  return byNetwork[network] ?? null;
 }
 
 /** Whether callbacks may currently reach an allowlisted private destination at all. */

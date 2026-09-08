@@ -1,4 +1,5 @@
 import {
+  NETWORK_IDENTIFIERS,
   USDC_BRIDGED_POLYGON_MAINNET_ADDRESS,
   USDC_POLYGON_AMOY_ADDRESS,
   USDC_POLYGON_MAINNET_ADDRESS,
@@ -164,5 +165,69 @@ describe('explorer links', () => {
   it('reports no link for the local chain', () => {
     expect(explorerTransactionUrl('local-anvil', '0xabc')).toBeNull();
     expect(explorerAccountUrl('local-anvil', '0xdef')).toBeNull();
+  });
+});
+
+/**
+ * The rules a new entry has to satisfy, asserted over every entry rather than over the ones that
+ * exist today.
+ *
+ * This is what makes "adding a network is one frozen entry" a claim that can fail. Someone adding
+ * Ethereum or BNB Smart Chain writes data, and these tests are what tell them the data is wrong —
+ * a checksummed token address, or a token named on both lists, would otherwise be discovered by a
+ * customer whose transfer was never credited.
+ */
+describe('the rules any new network must satisfy', () => {
+  it.each(ALL_NETWORKS)('%s identifies every asset by a lowercase address', (network) => {
+    const configuration = networkConfigurationFor(network);
+    for (const asset of [...configuration.assetAllowlist, ...configuration.assetDenylist]) {
+      expect(asset.reference).toBe(asset.reference.toLowerCase());
+    }
+  });
+
+  it.each(ALL_NETWORKS)('%s never credits an asset it also denies', (network) => {
+    const configuration = networkConfigurationFor(network);
+    const denied = new Set(configuration.assetDenylist.map((asset) => asset.reference));
+    for (const asset of configuration.assetAllowlist) {
+      expect(denied.has(asset.reference)).toBe(false);
+    }
+  });
+
+  it.each(ALL_NETWORKS)('%s lists each creditable asset once', (network) => {
+    const references = networkConfigurationFor(network).assetAllowlist.map(
+      (asset) => asset.reference,
+    );
+    expect(new Set(references).size).toBe(references.length);
+  });
+
+  it.each(ALL_NETWORKS)('%s states decimals rather than assuming eighteen', (network) => {
+    for (const asset of networkConfigurationFor(network).assetAllowlist) {
+      expect(asset.decimals).toBeGreaterThanOrEqual(0);
+      expect(asset.decimals).toBeLessThanOrEqual(36);
+    }
+  });
+
+  it.each(ALL_NETWORKS)('%s can absorb a reorg deeper than it waits for', (network) => {
+    const configuration = networkConfigurationFor(network);
+    expect(configuration.maximumReorgDepth).toBeGreaterThanOrEqual(
+      configuration.requiredConfirmations,
+    );
+  });
+
+  // A trailing slash produces a link with a double slash, which some explorers answer with a 404.
+  it.each(ALL_NETWORKS)('%s carries an explorer base URL that is usable as a prefix', (network) => {
+    const baseUrl = networkConfigurationFor(network).explorerBaseUrl;
+    if (baseUrl === '') {
+      return;
+    }
+    expect(baseUrl.startsWith('https://')).toBe(true);
+    expect(baseUrl.endsWith('/')).toBe(false);
+  });
+
+  it('names every network in the shared identifier list, so no adapter can invent one', () => {
+    for (const network of ALL_NETWORKS) {
+      expect(NETWORK_IDENTIFIERS).toContain(network);
+    }
+    expect(ALL_NETWORKS).toHaveLength(NETWORK_IDENTIFIERS.length);
   });
 });

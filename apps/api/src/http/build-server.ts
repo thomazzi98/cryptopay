@@ -12,6 +12,11 @@ import type { PaymentRepository } from '../infrastructure/persistence/payment.re
 import { runWithRequestContext } from '../observability/logger.js';
 import { createAuthenticationHook } from './authentication.js';
 import {
+  assertRoutesMatchDocument,
+  registerOpenApiRoute,
+  type RegisteredRoute,
+} from './openapi.js';
+import {
   ApplicationError,
   PROBLEM_CONTENT_TYPE,
   toProblemDetails,
@@ -26,6 +31,7 @@ import type { UlidFactory } from '../infrastructure/system/ulid.js';
 import { registerCheckoutRoutes } from './routes/checkout.routes.js';
 import { registerHealthRoutes } from './routes/health.routes.js';
 import { registerMerchantRoutes } from './routes/merchants.routes.js';
+import { registerNetworkRoutes } from './routes/networks.routes.js';
 import { registerPaymentRoutes } from './routes/payments.routes.js';
 import { registerWebhookRoutes } from './routes/webhooks.routes.js';
 import type { ApplicationServer } from './server-types.js';
@@ -138,6 +144,15 @@ export function buildServer(dependencies: ServerDependencies): ApplicationServer
     bodyLimit: MAXIMUM_REQUEST_BODY_BYTES,
   });
 
+  // Registered before any route, because the hook only sees routes added after it.
+  const registeredRoutes: RegisteredRoute[] = [];
+  server.addHook('onRoute', (route) => {
+    const methods = Array.isArray(route.method) ? route.method : [route.method];
+    for (const method of methods) {
+      registeredRoutes.push({ method, url: route.url });
+    }
+  });
+
   server.addHook('onRequest', (request, reply, done) => {
     reply.header('x-request-id', request.id);
     runWithRequestContext({ requestId: request.id }, done);
@@ -194,7 +209,13 @@ export function buildServer(dependencies: ServerDependencies): ApplicationServer
     blockCursorRepository: dependencies.blockCursorRepository,
     now: () => new Date(),
   });
+  registerOpenApiRoute(server, configuration.publicApiBaseUrl);
   registerMerchantRoutes(server, { merchantRepository, authenticate });
+  registerNetworkRoutes(server, {
+    authenticate,
+    configuration,
+    blockCursorRepository: dependencies.blockCursorRepository,
+  });
   registerPaymentRoutes(server, {
     authenticate,
     paymentCreator: dependencies.paymentCreator,
@@ -220,5 +241,6 @@ export function buildServer(dependencies: ServerDependencies): ApplicationServer
     now: () => new Date(),
   });
 
+  assertRoutesMatchDocument(registeredRoutes);
   return server;
 }

@@ -1,7 +1,5 @@
 import { getAddress } from 'viem';
 import { describe, expect, it } from 'vitest';
-import { z } from 'zod';
-import { createDocument } from 'zod-openapi';
 
 import {
   AccountSchema,
@@ -150,7 +148,7 @@ describe('create payment request', () => {
     { description: 'an unknown network', patch: { network: 'ethereum-mainnet' } },
     { description: 'an amount as a number', patch: { amount: 25 } },
     { description: 'a negative amount', patch: { amount: '-25.00' } },
-    { description: 'a non-https callback url', patch: { callbackUrl: 'ftp://example.com/hook' } },
+    { description: 'a non-web callback url', patch: { callbackUrl: 'ftp://example.com/hook' } },
     { description: 'a malformed callback url', patch: { callbackUrl: 'not-a-url' } },
     { description: 'an expiry below one minute', patch: { expiresInSeconds: 59 } },
     { description: 'an expiry beyond a day', patch: { expiresInSeconds: 86_401 } },
@@ -169,7 +167,16 @@ describe('create payment request', () => {
   });
 });
 
-describe('the static callback url policy', () => {
+/**
+ * The schema checks the shape and nothing else.
+ *
+ * Requiring https, a fully qualified hostname and no internal suffix are all real rules, and they
+ * live in the server's destination policy rather than here, because a development deployment may
+ * name one exact private destination it is permitted to reach and a browser-safe schema cannot know
+ * which. Keeping one implementation is what stops the two disagreeing; the server applies it when
+ * the payment is created and again before every delivery attempt.
+ */
+describe('the shape of a callback url', () => {
   it('accepts an https merchant endpoint', () => {
     expect(
       CallbackUrlSchema.safeParse('https://merchant.example.com/webhooks/cryptopay').success,
@@ -177,7 +184,6 @@ describe('the static callback url policy', () => {
   });
 
   it.each([
-    { description: 'plain http', candidate: 'http://merchant.example.com/hook' },
     { description: 'a non-web scheme', candidate: 'ftp://merchant.example.com/hook' },
     { description: 'a javascript url', candidate: 'javascript:alert(1)' },
     {
@@ -186,13 +192,24 @@ describe('the static callback url policy', () => {
     },
     { description: 'a bare IPv4 literal', candidate: 'https://169.254.169.254/hook' },
     { description: 'a bracketed IPv6 literal', candidate: 'https://[::1]/hook' },
-    { description: 'a single-label hostname', candidate: 'https://localhost/hook' },
-    { description: 'an .internal hostname', candidate: 'https://buildserver.internal/hook' },
-    { description: 'an .local hostname', candidate: 'https://printer.local/hook' },
     { description: 'text that is not a url', candidate: 'not-a-url' },
     { description: 'an empty string', candidate: '' },
   ])('rejects $description', ({ candidate }) => {
     expect(CallbackUrlSchema.safeParse(candidate).success).toBe(false);
+  });
+
+  /**
+   * Accepted by the shape check and refused by the server. Asserting that here is what keeps the
+   * split honest: these are not permitted, they are simply decided somewhere that knows the
+   * deployment.
+   */
+  it.each([
+    'http://merchant.example.com/hook',
+    'https://localhost/hook',
+    'https://buildserver.internal/hook',
+    'https://printer.local/hook',
+  ])('leaves %s for the server to decide', (candidate) => {
+    expect(CallbackUrlSchema.safeParse(candidate).success).toBe(true);
   });
 
   // WHATWG parsing normalises the whole IPv4 encoding family before any check runs, which is why
@@ -201,7 +218,6 @@ describe('the static callback url policy', () => {
     { description: 'decimal', candidate: 'https://2130706433/hook' },
     { description: 'octal', candidate: 'https://0177.0.0.1/hook' },
     { description: 'short form', candidate: 'https://127.1/hook' },
-    { description: 'a trailing dot', candidate: 'https://127.0.0.1./hook' },
   ])('rejects loopback written in $description form', ({ candidate }) => {
     expect(CallbackUrlSchema.safeParse(candidate).success).toBe(false);
   });
@@ -212,9 +228,9 @@ describe('the static callback url policy', () => {
   });
 
   it('explains why it refused, so a merchant can fix it', () => {
-    const result = CallbackUrlSchema.safeParse('http://merchant.example.com/hook');
+    const result = CallbackUrlSchema.safeParse('ftp://merchant.example.com/hook');
     expect(result.success).toBe(false);
-    expect(result.error?.issues.map((issue) => issue.message).join(' ')).toContain('https');
+    expect(result.error?.issues.map((issue) => issue.message).join(' ')).toContain('http');
   });
 });
 
@@ -341,98 +357,5 @@ describe('problem details', () => {
     };
     expect(ProblemDetailsSchema.safeParse({ ...base, status: 200 }).success).toBe(false);
     expect(ProblemDetailsSchema.safeParse({ ...base, status: 600 }).success).toBe(false);
-  });
-});
-
-/**
- * The OpenAPI document is assembled by the API from its registered routes, so that no endpoint can
- * be documented before it is served. This suite proves the schemas themselves convert cleanly, which
- * is the part that would otherwise only be discovered when the server is wired up.
- */
-describe('OpenAPI 3.1 conversion', () => {
-  const document = createDocument({
-    openapi: '3.1.0',
-    info: { title: 'CryptoPay', version: '1.0.0' },
-    components: {
-      schemas: {
-        Payment: PaymentSchema,
-        Checkout: CheckoutSchema,
-        CreatePaymentRequest: CreatePaymentRequestSchema,
-        ProblemDetails: ProblemDetailsSchema,
-        Amount: AmountSchema,
-      },
-    },
-    paths: {
-      '/v1/payments': {
-        post: {
-          requestBody: {
-            content: { 'application/json': { schema: CreatePaymentRequestSchema } },
-          },
-          responses: {
-            201: {
-              description: 'Created',
-              content: { 'application/json': { schema: PaymentSchema } },
-            },
-          },
-        },
-      },
-    },
-  });
-
-  it('emits an OpenAPI 3.1 document', () => {
-    expect(document.openapi).toBe('3.1.0');
-  });
-
-  it('registers every named component', () => {
-    const registered = Object.keys(document.components?.schemas ?? {});
-    for (const expected of [
-      'Amount',
-      'Asset',
-      'Checkout',
-      'CreatePaymentRequest',
-      'Metadata',
-      'Payment',
-      'PaymentTransfer',
-      'ProblemDetails',
-    ]) {
-      expect(registered).toContain(expected);
-    }
-  });
-
-  it('never emits a component carrying key material', () => {
-    const serialized = JSON.stringify(document.components?.schemas ?? {});
-    for (const forbidden of [
-      'derivationIndex',
-      'allocationReference',
-      'privateKey',
-      'masterSeed',
-    ]) {
-      expect(serialized).not.toContain(forbidden);
-    }
-  });
-
-  it('renders amounts as strings rather than numbers', () => {
-    const amount = document.components?.schemas?.Amount;
-    expect(amount).toMatchObject({
-      properties: { baseUnits: { type: 'string' }, display: { type: 'string' } },
-    });
-  });
-
-  it('carries the request body schema through to the path', () => {
-    const operation = document.paths?.['/v1/payments']?.post;
-    expect(operation?.requestBody).toBeDefined();
-    expect(operation?.responses?.[201]).toBeDefined();
-  });
-
-  it('produces a document that survives a JSON round-trip', () => {
-    const serialized = JSON.stringify(document);
-    expect(serialized.length).toBeGreaterThan(0);
-    const reparse = () => JSON.parse(serialized) as unknown;
-    expect(reparse).not.toThrow();
-  });
-
-  it('keeps zod out of the emitted document', () => {
-    expect(JSON.stringify(document)).not.toContain('ZodType');
-    expect(z).toBeDefined();
   });
 });

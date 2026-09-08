@@ -20,8 +20,7 @@
   },
   "devDependencies": {
     "@types/node": "24.13.3",
-    "viem": "2.56.3",
-    "zod-openapi": "6.0.2"
+    "viem": "2.56.3"
   },
   "dependencies": {
     "zod": "4.5.4"

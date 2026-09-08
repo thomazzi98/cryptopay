@@ -34,7 +34,7 @@ async function writeMigration(name: string, sql: string): Promise<void> {
 
 describe('applyMigrations', () => {
   it('applies a new migration once and reports it as applied', async () => {
-    await writeMigration('0001_probe.sql', 'CREATE TABLE probe_one (id TEXT PRIMARY KEY);');
+    await writeMigration('9001_probe.sql', 'CREATE TABLE probe_one (id TEXT PRIMARY KEY);');
 
     const first = await applyMigrations(pool, migrationsDirectory);
     expect(first).toHaveLength(1);
@@ -46,25 +46,28 @@ describe('applyMigrations', () => {
 
   it('applies migrations in filename order', async () => {
     await writeMigration(
-      '0002_probe.sql',
+      '9002_probe.sql',
       'CREATE TABLE probe_two (id TEXT PRIMARY KEY REFERENCES probe_one (id));',
     );
     const applied = await applyMigrations(pool, migrationsDirectory);
     expect(applied.map((migration) => migration.name)).toStrictEqual([
-      '0001_probe.sql',
-      '0002_probe.sql',
+      '9001_probe.sql',
+      '9002_probe.sql',
     ]);
   });
 
+  // Numbered far above the real migrations on purpose. The isolated database is cloned from the
+  // migrated template, so the schema version is the newest name across both sets, and probes numbered
+  // alongside the real ones would make this assertion pass or fail on how many migrations exist.
   it('reports the newest migration as the schema version', async () => {
-    expect(await readSchemaVersion(pool)).toBe('0002_probe.sql');
+    expect(await readSchemaVersion(pool)).toBe('9002_probe.sql');
   });
 
   // Editing a shipped migration otherwise surfaces as an environment behaving differently from its
   // schema, which is a far more expensive way to discover the same mistake.
   it('refuses to run when an applied migration has been edited', async () => {
     await writeMigration(
-      '0001_probe.sql',
+      '9001_probe.sql',
       'CREATE TABLE probe_one (id TEXT PRIMARY KEY, extra TEXT);',
     );
     await expect(applyMigrations(pool, migrationsDirectory)).rejects.toThrow(
@@ -73,13 +76,13 @@ describe('applyMigrations', () => {
   });
 
   it('names the offending migration in the error', async () => {
-    await expect(applyMigrations(pool, migrationsDirectory)).rejects.toThrow(/0001_probe\.sql/);
+    await expect(applyMigrations(pool, migrationsDirectory)).rejects.toThrow(/9001_probe\.sql/);
   });
 
   it('rolls a failing migration back rather than half-applying it', async () => {
-    await writeMigration('0001_probe.sql', 'CREATE TABLE probe_one (id TEXT PRIMARY KEY);');
+    await writeMigration('9001_probe.sql', 'CREATE TABLE probe_one (id TEXT PRIMARY KEY);');
     await writeMigration(
-      '0003_broken.sql',
+      '9003_broken.sql',
       'CREATE TABLE probe_three (id TEXT PRIMARY KEY); CREATE TABLE probe_three (id TEXT);',
     );
 
@@ -91,20 +94,20 @@ describe('applyMigrations', () => {
     expect(table.rows[0]?.count).toBe('0');
 
     const recorded = await pool.query<{ count: string }>(
-      "SELECT count(*) AS count FROM schema_migrations WHERE name = '0003_broken.sql'",
+      "SELECT count(*) AS count FROM schema_migrations WHERE name = '9003_broken.sql'",
     );
     expect(recorded.rows[0]?.count).toBe('0');
   });
 
   it('ignores files that are not numbered migrations', async () => {
-    await rm(join(migrationsDirectory, '0003_broken.sql'));
+    await rm(join(migrationsDirectory, '9003_broken.sql'));
     await writeMigration('README.md', 'not a migration');
     await writeMigration('draft.sql', 'CREATE TABLE never_created (id TEXT);');
 
     const applied = await applyMigrations(pool, migrationsDirectory);
     expect(applied.map((migration) => migration.name)).toStrictEqual([
-      '0001_probe.sql',
-      '0002_probe.sql',
+      '9001_probe.sql',
+      '9002_probe.sql',
     ]);
   });
 });

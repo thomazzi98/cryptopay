@@ -25,20 +25,23 @@ const LOWERCASE_ADDRESS_PATTERN = /^0x[\da-f]{40}$/;
 const TRANSACTION_REFERENCE_PATTERN = /^0x[\da-f]{64}$/;
 
 const IPV4_HOSTNAME_PATTERN = /^\d{1,3}(?:\.\d{1,3}){3}$/;
-const INTERNAL_SUFFIXES = ['.internal', '.local', '.home.arpa', '.localhost'];
 const MAXIMUM_CALLBACK_URL_LENGTH = 2048;
 
 /**
- * The static layer of the callback URL policy: everything decidable from the URL text alone, so a
- * merchant is told at registration time rather than after a failed delivery.
+ * The shape of a callback URL, and only the shape.
  *
- * Parsing is delegated entirely to WHATWG `new URL()` and only its parsed components are inspected.
- * That single step normalises the whole IPv4 encoding family, so `0177.0.0.1`, `127.1` and
- * `2130706433` all arrive here as `127.0.0.1`. Hand-rolled decoders are where bypasses live.
+ * Everything decidable from the text alone and true under every configuration lives here: it parses,
+ * it is a web URL, it carries no credentials, and it names a host rather than an address. Parsing is
+ * delegated entirely to WHATWG `new URL()` and only its parsed components are inspected, which
+ * normalises the whole IPv4 encoding family in one step, so `0177.0.0.1`, `127.1` and `2130706433`
+ * all arrive here as `127.0.0.1`. Hand-rolled decoders are where bypasses live.
  *
- * This is not the whole defence. DNS resolution against the denied-range table, pinning the
- * resolved address for the connection, refusing redirects, and network containment of the delivery
- * worker are enforced server-side before every attempt.
+ * What is deliberately NOT here: requiring https, requiring a fully qualified hostname, and refusing
+ * internal suffixes. Those depend on the deployment, because a development deployment may name one
+ * exact private destination it is allowed to reach, and a schema in a browser-safe package cannot
+ * know which. The server applies them through the destination policy at creation time and again
+ * before every delivery attempt, so a merchant is still told immediately and the rule has one
+ * implementation rather than two that can disagree.
  */
 function refineCallbackUrl(value: string, context: z.RefinementCtx): void {
   let parsed: URL;
@@ -49,8 +52,8 @@ function refineCallbackUrl(value: string, context: z.RefinementCtx): void {
     return;
   }
 
-  if (parsed.protocol !== 'https:') {
-    context.addIssue({ code: 'custom', message: 'Callback URLs must use https' });
+  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+    context.addIssue({ code: 'custom', message: 'Callback URLs must be http or https' });
   }
   if (parsed.username !== '' || parsed.password !== '') {
     context.addIssue({
@@ -66,18 +69,6 @@ function refineCallbackUrl(value: string, context: z.RefinementCtx): void {
       message: 'Callback URLs must name a host, not an IP address',
     });
   }
-  if (!hostname.includes('.')) {
-    context.addIssue({
-      code: 'custom',
-      message: 'Callback URLs must use a fully qualified hostname',
-    });
-  }
-  if (INTERNAL_SUFFIXES.some((suffix) => hostname.endsWith(suffix))) {
-    context.addIssue({
-      code: 'custom',
-      message: 'Callback URLs must not target an internal hostname',
-    });
-  }
 }
 
 export const CallbackUrlSchema = z
@@ -87,7 +78,7 @@ export const CallbackUrlSchema = z
   .meta({
     id: 'CallbackUrl',
     description:
-      'HTTPS endpoint that receives signed webhooks. Re-validated against the full SSRF policy, including DNS resolution, before every delivery attempt.',
+      'Endpoint that receives signed webhooks. In any deployment you would use, this must be https on port 443 with a fully qualified hostname; the server enforces that, together with DNS resolution against the denied ranges and pinning of the resolved address, when the payment is created and again before every delivery attempt.',
     example: 'https://merchant.example.com/webhooks/cryptopay',
   });
 
@@ -122,7 +113,10 @@ export const EnvironmentSchema = z
 
 export const PaymentStatusSchema = z
   .enum(PAYMENT_STATUSES as unknown as [string, ...string[]])
-  .meta({ description: 'Lifecycle status. See docs/state-machine.md for the transition table.' });
+  .meta({
+    id: 'PaymentStatus',
+    description: 'Lifecycle status. See docs/state-machine.md for the transition table.',
+  });
 
 export const AccountSchema = z.string().regex(LOWERCASE_ADDRESS_PATTERN).meta({
   description: 'A blockchain account, always lowercase. Checksum it for display, never to compare.',
@@ -430,9 +424,18 @@ export const NetworkDescriptorSchema = z
     displayName: z.string(),
     environment: EnvironmentSchema,
     nativeCurrency: z.object({ symbol: z.string(), decimals: z.number().int() }),
-    requiredConfirmations: z.number().int().min(0),
-    measuredBlockIntervalMilliseconds: z.number().int().positive().nullable(),
-    assets: z.array(AssetSchema),
+    requiredConfirmations: z.number().int().min(0).meta({
+      description:
+        'How many confirmations this deployment requires. Policy, not a chain constant, and the finality tag is the authoritative gate above it.',
+    }),
+    requiresFinalityTag: z.boolean().meta({
+      description:
+        'Whether a payment on this network additionally waits for the chain finality tag to cover its settling block.',
+    }),
+    assets: z.array(AssetSchema).meta({
+      description:
+        'Every asset this deployment credits on this network, identified by contract address. An asset absent from this list is never credited, whatever symbol it reports.',
+    }),
     explorerBaseUrl: z.string(),
     walletRpcUrl: z.url().nullable().meta({
       description:
@@ -440,6 +443,71 @@ export const NetworkDescriptorSchema = z
     }),
   })
   .meta({ id: 'NetworkDescriptor' });
+
+/**
+ * What a caller may hand to `POST /v1/payments`, as data.
+ *
+ * An integrator discovers the networks, the assets and the confirmation policy rather than
+ * hardcoding them, so a deployment that adds a network becomes a value in this list rather than a
+ * release on their side.
+ */
+export const NetworkListSchema = z
+  .object({ data: z.array(NetworkDescriptorSchema) })
+  .meta({ id: 'NetworkList' });
+
+export const PaymentTransferListSchema = z
+  .object({ data: z.array(PaymentTransferSchema) })
+  .meta({ id: 'PaymentTransferList' });
+
+export const PaymentTimelineSchema = z
+  .object({ data: z.array(PaymentStatusChangeSchema) })
+  .meta({ id: 'PaymentTimeline' });
+
+/** The deliveries of one payment. Without the per-attempt detail, which the delivery resource has. */
+export const PaymentDeliverySummarySchema = z
+  .object({
+    identifier: WebhookDeliveryIdentifierSchema,
+    eventType: z.string(),
+    destinationUrl: z.string(),
+    status: WebhookDeliveryStatusSchema,
+    attemptCount: z.number().int().min(0),
+    deliveredAt: z.iso.datetime().nullable(),
+    lastFailure: z.string().nullable(),
+    createdAt: z.iso.datetime(),
+  })
+  .meta({ id: 'PaymentDeliverySummary' });
+
+export const PaymentDeliveryListSchema = z
+  .object({ data: z.array(PaymentDeliverySummarySchema) })
+  .meta({ id: 'PaymentDeliveryList' });
+
+export const WebhookSecretListSchema = z
+  .object({ data: z.array(WebhookSecretSchema) })
+  .meta({ id: 'WebhookSecretList' });
+
+export const HealthReportSchema = z.object({ status: z.literal('ok') }).meta({
+  id: 'HealthReport',
+  description: 'Liveness only. It depends on nothing else by design.',
+});
+
+export const ComponentStatusSchema = z.enum(['ok', 'degraded', 'failed']);
+
+export const ReadinessComponentSchema = z
+  .object({ name: z.string(), status: ComponentStatusSchema, detail: z.string() })
+  .meta({ id: 'ReadinessComponent' });
+
+export const ReadinessReportSchema = z
+  .object({
+    status: ComponentStatusSchema,
+    callbackSsrfPolicy: z.enum(['strict', 'relaxed']),
+    uptimeSeconds: z.number().int().min(0),
+    components: z.array(ReadinessComponentSchema),
+  })
+  .meta({
+    id: 'ReadinessReport',
+    description:
+      'Each dependency reported separately, so an operator sees which one is at fault. A halted network is degraded rather than failed: the API still answers.',
+  });
 
 export const MerchantSchema = z
   .object({
@@ -463,6 +531,13 @@ export type TransactionHintRequest = z.infer<typeof TransactionHintRequestSchema
 export type ProblemDetails = z.infer<typeof ProblemDetailsSchema>;
 export type NetworkDescriptor = z.infer<typeof NetworkDescriptorSchema>;
 export type Merchant = z.infer<typeof MerchantSchema>;
+export type NetworkList = z.infer<typeof NetworkListSchema>;
+export type PaymentTransferList = z.infer<typeof PaymentTransferListSchema>;
+export type PaymentTimeline = z.infer<typeof PaymentTimelineSchema>;
+export type PaymentDeliverySummary = z.infer<typeof PaymentDeliverySummarySchema>;
+export type PaymentDeliveryList = z.infer<typeof PaymentDeliveryListSchema>;
+export type WebhookSecretList = z.infer<typeof WebhookSecretListSchema>;
+export type ReadinessReport = z.infer<typeof ReadinessReportSchema>;
 export type WebhookDelivery = z.infer<typeof WebhookDeliverySchema>;
 export type WebhookDeliveryList = z.infer<typeof WebhookDeliveryListSchema>;
 export type WebhookAttempt = z.infer<typeof WebhookAttemptSchema>;

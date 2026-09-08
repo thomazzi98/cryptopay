@@ -1,4 +1,4 @@
-import type { Environment } from '@cryptopay/shared';
+import { documentedOperations, type Environment, type NetworkList } from '@cryptopay/shared';
 import type { Pool } from 'pg';
 import { pino } from 'pino';
 import { afterAll, beforeAll, describe, expect, inject, it } from 'vitest';
@@ -201,15 +201,41 @@ describe('rejecting a payment that cannot settle', () => {
     { description: 'a negative amount', body: { amount: '-25.00' } },
     { description: 'more precision than the asset holds', body: { amount: '25.0000001' } },
     { description: 'a lifetime beyond a day', body: { expiresInSeconds: 86_401 } },
-    {
-      description: 'a callback url that is not https',
-      body: { callbackUrl: 'http://a.test/hook' },
-    },
   ])('rejects $description', async ({ body }) => {
     const response = await createPayment({
       body: { network: 'polygon-amoy', assetSymbol: 'USDC', amount: '25.00', ...body },
     });
     expect(response.statusCode).toBe(422);
+  });
+
+  /**
+   * The destination policy runs at creation, not only before a delivery. A merchant whose callback
+   * can never be reached learns it while they are looking at the response, and the reason they are
+   * given is the one the delivery worker would have produced, because it is the same function.
+   */
+  it.each([
+    { description: 'plain http', callbackUrl: 'http://merchant.example.com/hook' },
+    { description: 'a port other than 443', callbackUrl: 'https://merchant.example.com:8443/h' },
+    { description: 'a single-label host', callbackUrl: 'https://intranet/hook' },
+    { description: 'a loopback name', callbackUrl: 'https://api.localhost/hook' },
+  ])('refuses a callback on $description at creation time', async ({ callbackUrl }) => {
+    const response = await createPayment({
+      body: { network: 'polygon-amoy', assetSymbol: 'USDC', amount: '25.00', callbackUrl },
+    });
+    expect(response.statusCode).toBe(422);
+    expect(response.body).toContain('callback URL cannot be used');
+  });
+
+  it('accepts a callback a merchant could actually run', async () => {
+    const response = await createPayment({
+      body: {
+        network: 'polygon-amoy',
+        assetSymbol: 'USDC',
+        amount: '25.00',
+        callbackUrl: 'https://hooks.merchant.example/cryptopay',
+      },
+    });
+    expect(response.statusCode).toBe(201);
   });
 
   /**
@@ -452,5 +478,130 @@ describe('cancelling a payment', () => {
       headers: { authorization: `Bearer ${otherMerchantKey}` },
     });
     expect(response.statusCode).toBe(404);
+  });
+});
+
+describe('the callback a cancellation produces', () => {
+  it('enqueues the promised payment.canceled delivery', async () => {
+    const created = await createPayment({
+      body: {
+        network: 'polygon-amoy',
+        assetSymbol: 'USDC',
+        amount: '25.00',
+        callbackUrl: 'https://hooks.merchant.example/cryptopay',
+      },
+    });
+    const identifier = created.json<{ identifier: string }>().identifier;
+
+    await server.inject({
+      method: 'POST',
+      url: `/v1/payments/${identifier}/cancel`,
+      headers: { authorization: `Bearer ${testKey}` },
+    });
+
+    const delivery = await pool.query<{
+      event_type: string;
+      destination_url: string;
+      payload: string;
+    }>(
+      'SELECT event_type, destination_url, payload FROM webhook_deliveries WHERE payment_id = $1',
+      [identifier],
+    );
+    expect(delivery.rows).toHaveLength(1);
+    expect(delivery.rows[0]).toMatchObject({
+      event_type: 'payment.canceled',
+      destination_url: 'https://hooks.merchant.example/cryptopay',
+    });
+    expect(JSON.parse(delivery.rows[0]!.payload)).toMatchObject({
+      type: 'payment.canceled',
+      data: { identifier, status: 'canceled' },
+    });
+  });
+
+  it('enqueues nothing for a merchant who is polling instead', async () => {
+    const created = await createPayment();
+    const identifier = created.json<{ identifier: string }>().identifier;
+
+    await server.inject({
+      method: 'POST',
+      url: `/v1/payments/${identifier}/cancel`,
+      headers: { authorization: `Bearer ${testKey}` },
+    });
+
+    const delivery = await pool.query('SELECT 1 FROM webhook_deliveries WHERE payment_id = $1', [
+      identifier,
+    ]);
+    expect(delivery.rowCount).toBe(0);
+  });
+});
+
+/**
+ * What another system integrates against: the contract document and the discovery endpoint that
+ * keeps chain identifiers, token addresses and confirmation counts out of their source code.
+ */
+describe('the integration surface', () => {
+  it('serves the contract without a key, because a document nobody can read is not a contract', async () => {
+    const response = await server.inject({ method: 'GET', url: '/openapi.json' });
+    expect(response.statusCode).toBe(200);
+    expect(response.headers['content-type']).toContain('application/json');
+    expect(response.json<{ openapi: string }>().openapi).toBe('3.1.0');
+  });
+
+  it('documents only endpoints this server actually serves', () => {
+    for (const operation of documentedOperations()) {
+      const url = operation.path.replaceAll(/\{(?<parameter>[^}]+)\}/gu, ':$<parameter>');
+      expect(server.hasRoute({ method: operation.method.toUpperCase() as 'GET', url })).toBe(true);
+    }
+  });
+
+  it('lists the networks a test key may use, and only those', async () => {
+    const response = await server.inject({
+      method: 'GET',
+      url: '/v1/networks',
+      headers: { authorization: `Bearer ${testKey}` },
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = response.json<NetworkList>();
+    expect(body.data.map((network) => network.network)).toStrictEqual(['polygon-amoy']);
+    expect(body.data[0]).toMatchObject({
+      chainIdentifier: 80_002,
+      requiredConfirmations: 5,
+      requiresFinalityTag: true,
+      // Never configured in this test, and never guessed from a scanning endpoint that may carry a
+      // provider key.
+      walletRpcUrl: null,
+    });
+    expect(body.data[0]?.assets).toStrictEqual([
+      { reference: '0x41e94eb019c0762f9bfcf9fb1e58725bfb0e7582', symbol: 'USDC', decimals: 6 },
+    ]);
+  });
+
+  it('never offers a live network to a test key', async () => {
+    const response = await server.inject({
+      method: 'GET',
+      url: '/v1/networks',
+      headers: { authorization: `Bearer ${liveKey}` },
+    });
+    const body = response.json<NetworkList>();
+    expect(body.data.map((network) => network.network)).toStrictEqual(['polygon-mainnet']);
+  });
+
+  it('never lists the bridged token, which reports the identical symbol', async () => {
+    const response = await server.inject({
+      method: 'GET',
+      url: '/v1/networks',
+      headers: { authorization: `Bearer ${liveKey}` },
+    });
+    const references = response
+      .json<NetworkList>()
+      .data.flatMap((network) => network.assets.map((asset) => asset.reference));
+    expect(references).toContain('0x3c499c542cef5e3811e1192ce70d8cc03d5c3359');
+    expect(references).not.toContain('0x2791bca1f2de4661ed88a30c99a7a9449aa84174');
+  });
+
+  it('requires a key to enumerate networks', async () => {
+    const response = await server.inject({ method: 'GET', url: '/v1/networks' });
+    expect(response.statusCode).toBe(401);
   });
 });
