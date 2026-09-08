@@ -214,13 +214,6 @@ export const PaymentStatusChangeSchema = z
   })
   .meta({ id: 'PaymentStatusChange' });
 
-export const SettlementStatusSchema = z
-  .enum(['not_started', 'funding_gas', 'sweeping', 'settled', 'failed'])
-  .meta({
-    description:
-      'Sweeping the received funds. Orthogonal to payment status, so a settlement failure can never corrupt a completed payment.',
-  });
-
 export const PaymentSchema = z
   .object({
     identifier: PaymentIdentifierSchema,
@@ -248,7 +241,6 @@ export const PaymentSchema = z
         'Whether the settling block is covered by the chain finality tag. Distinct from the confirmation count and reported separately.',
     }),
     settlingBlockHeight: BlockHeightSchema.nullable(),
-    settlementStatus: SettlementStatusSchema,
     merchantReference: z.string().max(255).nullable(),
     callbackUrl: CallbackUrlSchema.nullable(),
     metadata: MetadataSchema,

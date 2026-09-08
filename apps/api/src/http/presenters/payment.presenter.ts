@@ -19,6 +19,11 @@ import type { StoredTransfer } from '../../infrastructure/persistence/payment-tr
  * The presenter names every field it emits rather than spreading the aggregate, which is why adding
  * a field to the domain can never accidentally publish it. There is no field here for a derivation
  * path or index, and the API contract declares none either.
+ *
+ * There is also no settlement field. Nothing sweeps yet, and a field that always answers the same
+ * thing promises a capability that does not exist: it reads as "the sweep has not started" rather
+ * than "there is no sweep", so a merchant waits for something that is never coming. It returns when
+ * there is something true to put in it.
  */
 
 export interface PaymentPresentationContext {
@@ -58,7 +63,6 @@ export function presentPayment(
     requiredConfirmations: payment.requiredConfirmations,
     finalityConfirmed: payment.finalityConfirmed,
     settlingBlockHeight: payment.settlingBlockHeight?.toString() ?? null,
-    settlementStatus: 'not_started',
     merchantReference: payment.merchantReference,
     callbackUrl: payment.callbackUrl,
     metadata: payment.metadata,

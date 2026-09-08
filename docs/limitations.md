@@ -97,6 +97,11 @@ mainnets, and refuses a key with any balance or nonce. It cannot help anyone who
 
 ## 8. What is not implemented
 
+- **Settlement.** Funds are received and credited but never swept: they stay at the address the
+  payment allocated. The API deliberately reports nothing about settlement, because a field that
+  always answers the same thing would be read as "the sweep has not started yet" rather than "there
+  is no sweep". The database column and the constraint that would make a double spend impossible are
+  in place; the worker that would use them is not.
 - **Refunds.** There is no path to return money to a customer who overpaid or paid late. Both states
   are detected, recorded and surfaced; resolving them is manual.
 - **Multiple merchants per key, teams, roles, or an accounts system.** The dashboard authenticates
