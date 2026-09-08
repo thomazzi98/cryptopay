@@ -2,6 +2,7 @@
 
 import type {
   Merchant,
+  NetworkDescriptor,
   Payment,
   PaymentStatusChange,
   PaymentTransfer,
@@ -47,6 +48,20 @@ export function useMerchantQuery() {
   return useQuery({
     queryKey: ['merchant', 'me'],
     queryFn: ({ signal }) => callApi<Merchant>('v1/merchants/me', { signal }),
+  });
+}
+
+/**
+ * What this key can actually settle on, from the API rather than from a list kept here.
+ *
+ * A list in the dashboard drifts from the deployment: it would offer a network nobody configured an
+ * endpoint for, and payment creation answers 503 behind the screen's primary button. The API returns
+ * only the networks it is scanning, for this key's environment.
+ */
+export function useNetworksQuery() {
+  return useQuery({
+    queryKey: ['networks'],
+    queryFn: ({ signal }) => callApi<Collection<NetworkDescriptor>>('v1/networks', { signal }),
   });
 }
 

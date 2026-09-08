@@ -1,6 +1,6 @@
 'use client';
 
-import type { CreatePaymentRequest, Merchant, Payment } from '@cryptopay/shared';
+import type { CreatePaymentRequest, Payment } from '@cryptopay/shared';
 import { useState, type FormEvent } from 'react';
 
 import { Button } from '@/components/ui/button';
@@ -8,8 +8,8 @@ import { Copyable } from '@/components/ui/data';
 import { Card, CardBody, CardHeader } from '@/components/ui/surfaces';
 import { callApi } from '@/lib/api-client';
 
-import { networkLabel, readErrorDetail } from './presentation';
-import { useMerchantQuery } from './queries';
+import { readErrorDetail } from './presentation';
+import { useMerchantQuery, useNetworksQuery } from './queries';
 
 /**
  * The only pane that writes.
@@ -24,21 +24,14 @@ const FIELD_LABEL = 'text-xs font-medium tracking-wide text-text-subtle uppercas
 const FIELD_CONTROL =
   'mt-1 w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text placeholder:text-text-subtle';
 
-/**
- * The same split the payments table enforces as a check constraint. Offering a network this key's
- * environment cannot settle would put a guaranteed database rejection behind the primary button.
- */
-const NETWORKS_BY_ENVIRONMENT: Readonly<Record<Merchant['environment'], readonly string[]>> =
-  Object.freeze({
-    live: ['polygon-mainnet'],
-    test: ['polygon-amoy', 'local-anvil'],
-  });
-
 export function CreatePane({ onCreated }: { onCreated: (payment: Payment) => void }) {
   const merchant = useMerchantQuery();
+  // Asked rather than assumed. A list kept in this bundle would offer a network the deployment is
+  // not scanning, and payment creation answers 503 from behind the primary button of this screen.
+  const availableNetworks = useNetworksQuery();
   const [amount, setAmount] = useState('25.00');
   const [selectedNetwork, setSelectedNetwork] = useState<string | null>(null);
-  const [assetSymbol, setAssetSymbol] = useState('USDC');
+  const [selectedAsset, setSelectedAsset] = useState<string | null>(null);
   const [merchantReference, setMerchantReference] = useState('');
   const [callbackUrl, setCallbackUrl] = useState('');
   const [idempotencyKey, setIdempotencyKey] = useState<string | null>(null);
@@ -47,18 +40,22 @@ export function CreatePane({ onCreated }: { onCreated: (payment: Payment) => voi
   const [attemptFailed, setAttemptFailed] = useState(false);
 
   const environment = merchant.data?.environment ?? null;
-  const networks = environment === null ? [] : NETWORKS_BY_ENVIRONMENT[environment];
-  const network =
-    selectedNetwork !== null && networks.includes(selectedNetwork)
-      ? selectedNetwork
-      : (networks[0] ?? null);
+  const networks = availableNetworks.data?.data ?? [];
+  const chosen =
+    networks.find((candidate) => candidate.network === selectedNetwork) ?? networks[0] ?? null;
+  const network = chosen?.network ?? null;
+  // The assets this network actually credits. Typing a symbol it does not is a validation error a
+  // merchant cannot see coming, and the symbol is display only in any case: identity is the address.
+  const assets = chosen?.assets ?? [];
+  const asset = assets.find((candidate) => candidate.symbol === selectedAsset) ?? assets[0] ?? null;
+  const assetSymbol = asset?.symbol ?? '';
 
   async function create(key: string, chosenNetwork: string): Promise<void> {
     const trimmedReference = merchantReference.trim();
     const trimmedCallbackUrl = callbackUrl.trim();
     const body: CreatePaymentRequest = {
       network: chosenNetwork,
-      assetSymbol: assetSymbol.trim(),
+      assetSymbol,
       amount: amount.trim(),
       ...(trimmedReference !== '' && { merchantReference: trimmedReference }),
       ...(trimmedCallbackUrl !== '' && { callbackUrl: trimmedCallbackUrl }),
@@ -76,7 +73,7 @@ export function CreatePane({ onCreated }: { onCreated: (payment: Payment) => voi
 
   function submit(event: FormEvent<HTMLFormElement>): void {
     event.preventDefault();
-    if (submitting || network === null) {
+    if (submitting || network === null || assetSymbol === '') {
       return;
     }
 
@@ -139,26 +136,35 @@ export function CreatePane({ onCreated }: { onCreated: (payment: Payment) => voi
                   setSelectedNetwork(event.target.value);
                 }}
               >
-                {networks.map((identifier) => (
-                  <option key={identifier} value={identifier}>
-                    {networkLabel(identifier)}
+                {networks.map((descriptor) => (
+                  <option key={descriptor.network} value={descriptor.network}>
+                    {descriptor.displayName}
                   </option>
                 ))}
               </select>
-              {environment !== null && (
+              {availableNetworks.isPending && (
                 <p className="mt-1 text-xs text-text-subtle">
-                  This key is a {environment} key, so these are the networks it can settle on.
+                  Reading which networks this key can settle on.
                 </p>
               )}
-              {merchant.isPending && (
-                <p className="mt-1 text-xs text-text-subtle">
-                  Reading which environment this key belongs to.
-                </p>
-              )}
-              {merchant.error !== null && (
+              {availableNetworks.error !== null && (
                 <p role="alert" className="mt-1 text-xs text-health-failed">
                   The networks this key can settle on could not be read.{' '}
-                  {readErrorDetail(merchant.error)}
+                  {readErrorDetail(availableNetworks.error)}
+                </p>
+              )}
+              {availableNetworks.error === null &&
+                !availableNetworks.isPending &&
+                networks.length === 0 && (
+                  <p role="alert" className="mt-1 text-xs text-health-failed">
+                    No network is being scanned for this environment, so a payment created now could
+                    never be detected. Configure an RPC endpoint first.
+                  </p>
+                )}
+              {environment !== null && networks.length > 0 && (
+                <p className="mt-1 text-xs text-text-subtle">
+                  This key is a {environment} key, and {chosen?.displayName ?? 'this network'} takes{' '}
+                  {chosen?.requiredConfirmations ?? 0} confirmations.
                 </p>
               )}
             </div>
@@ -167,16 +173,26 @@ export function CreatePane({ onCreated }: { onCreated: (payment: Payment) => voi
               <label className={FIELD_LABEL} htmlFor="simulator-asset">
                 Asset
               </label>
-              <input
+              <select
                 id="simulator-asset"
                 className={FIELD_CONTROL}
                 value={assetSymbol}
+                disabled={assets.length === 0}
                 onChange={(event) => {
-                  setAssetSymbol(event.target.value);
+                  setSelectedAsset(event.target.value);
                 }}
-                placeholder="USDC"
-                required
-              />
+              >
+                {assets.map((candidate) => (
+                  <option key={candidate.reference} value={candidate.symbol}>
+                    {candidate.symbol}
+                  </option>
+                ))}
+              </select>
+              {asset !== null && (
+                <p className="mt-1 text-xs text-text-subtle tabular">
+                  {asset.decimals} decimals, at {asset.reference.slice(0, 10)}...
+                </p>
+              )}
             </div>
           </div>
 

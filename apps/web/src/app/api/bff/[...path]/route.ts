@@ -27,6 +27,7 @@ const FORWARDED_METHODS = new Set(['GET', 'POST', 'DELETE']);
  */
 const ALLOWED_PATHS: readonly RegExp[] = Object.freeze([
   /^v1\/merchants\/me$/,
+  /^v1\/networks$/,
   /^v1\/payments$/,
   /^v1\/payments\/pay_[\dA-HJKMNP-TV-Z]{26}$/,
   /^v1\/payments\/pay_[\dA-HJKMNP-TV-Z]{26}\/(transfers|timeline|deliveries|cancel)$/,
