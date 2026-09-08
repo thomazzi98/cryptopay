@@ -197,7 +197,7 @@ function CheckoutScreen({
 
       {scanPanel}
 
-      <WalletPanel checkout={checkout} />
+      <WalletPanel checkout={checkout} checkoutToken={checkoutToken} />
 
       <Card>
         <CardHeader

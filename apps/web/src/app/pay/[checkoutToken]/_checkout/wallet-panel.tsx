@@ -126,7 +126,37 @@ function FaucetLink({ href, children }: { href: string; children: ReactNode }) {
   );
 }
 
-export function WalletPanel({ checkout }: { checkout: CheckoutView }) {
+/**
+ * A broadcast this browser has already made, remembered across a reload.
+ *
+ * Session storage rather than local storage: the memory should last as long as the tab that made the
+ * payment and no longer, and it is keyed per checkout so it can never suppress the button on a
+ * different payment. Every access is guarded because a browser set to block site data throws on the
+ * accessor itself, and a checkout page that fails to render is worse than one that forgets.
+ */
+function recallBroadcast(key: string): string | null {
+  try {
+    return sessionStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function rememberBroadcast(key: string, reference: string): void {
+  try {
+    sessionStorage.setItem(key, reference);
+  } catch {
+    // The customer keeps a working page; they lose only the memory of the broadcast on reload.
+  }
+}
+
+export function WalletPanel({
+  checkout,
+  checkoutToken,
+}: {
+  checkout: CheckoutView;
+  checkoutToken: string;
+}) {
   const connection = useConnection();
   const connectors = useConnectors();
   const chains = useChains();
@@ -137,11 +167,40 @@ export function WalletPanel({ checkout }: { checkout: CheckoutView }) {
 
   const [notice, setNotice] = useState<string | null>(null);
   const [pendingConnectorUid, setPendingConnectorUid] = useState<string | null>(null);
-  const [sentReference, setSentReference] = useState<string | null>(null);
+  // Restored from this browser rather than initialised empty, so a reload does not present a
+  // customer who has already paid with a button that pays again.
+  const [sentReference, setSentReference] = useState<string | null>(() =>
+    recallBroadcast(`cryptopay:broadcast:${checkoutToken}`),
+  );
 
   const tokenAddress = getAddress(checkout.asset.reference);
   const recipient = getAddress(checkout.receivingAccount);
   const requestedBaseUnits = BigInt(checkout.requestedAmount.baseUnits);
+
+  /**
+   * What is still owed, not what was invoiced.
+   *
+   * Sending the full amount whenever the wallet is connected is how one page refresh becomes a
+   * double payment: the panel is live for every non-final status, and `partially_funded` and
+   * `confirming` are both non-final. A customer who paid and reloaded, or who topped up a partial
+   * payment, would be offered a button that sends the whole invoice a second time — and this system
+   * has no refund path to give it back.
+   */
+  const creditedBaseUnits = BigInt(checkout.creditedAmount.baseUnits);
+  const outstandingBaseUnits =
+    creditedBaseUnits >= requestedBaseUnits ? 0n : requestedBaseUnits - creditedBaseUnits;
+  const outstandingDisplay = formatUnits(outstandingBaseUnits, checkout.asset.decimals);
+  const isFullyFunded = outstandingBaseUnits === 0n;
+
+  /**
+   * Whether this browser has already broadcast against this checkout.
+   *
+   * The credited figure lags the broadcast by however long the scanner takes to see the log, so for
+   * the first seconds after signing the outstanding amount is still the full invoice. Remembering
+   * the reference closes that window across a reload; it is per checkout token, so it cannot leak
+   * between payments.
+   */
+  const broadcastMemoryKey = `cryptopay:broadcast:${checkoutToken}`;
   const account = connection.address;
   const isConnected = connection.status === 'connected';
   const isOnAmoy = checkout.network === 'polygon-amoy';
@@ -192,9 +251,9 @@ export function WalletPanel({ checkout }: { checkout: CheckoutView }) {
     gasHeld !== undefined && (gasNeeded === null ? gasHeld > 0n : gasHeld >= gasNeeded);
 
   const shortfall =
-    tokenBalance === undefined || tokenBalance >= requestedBaseUnits
+    tokenBalance === undefined || tokenBalance >= outstandingBaseUnits
       ? null
-      : formatUnits(requestedBaseUnits - tokenBalance, checkout.asset.decimals);
+      : formatUnits(outstandingBaseUnits - tokenBalance, checkout.asset.decimals);
 
   const checks: readonly PreflightCheck[] = [
     {
@@ -244,7 +303,7 @@ export function WalletPanel({ checkout }: { checkout: CheckoutView }) {
       label: `Enough ${checkout.asset.symbol} to cover the payment`,
       state: stateOf(
         tokenBalance !== undefined,
-        tokenBalance !== undefined && tokenBalance >= requestedBaseUnits,
+        tokenBalance !== undefined && tokenBalance >= outstandingBaseUnits,
       ),
       detail:
         tokenBalance === undefined
@@ -301,10 +360,11 @@ export function WalletPanel({ checkout }: { checkout: CheckoutView }) {
         address: tokenAddress,
         abi: erc20Abi,
         functionName: 'transfer',
-        args: [recipient, requestedBaseUnits],
+        args: [recipient, outstandingBaseUnits],
         chainId: checkout.chainIdentifier,
       });
       setSentReference(reference);
+      rememberBroadcast(broadcastMemoryKey, reference);
     } catch (error) {
       writeContract.reset();
       if (hasProviderCode(error, USER_REJECTED_REQUEST)) {
@@ -398,7 +458,7 @@ export function WalletPanel({ checkout }: { checkout: CheckoutView }) {
               ))}
             </ul>
 
-            {sentReference === null && (
+            {sentReference === null && !isFullyFunded && (
               <Button
                 variant="primary"
                 className="w-full"
@@ -408,8 +468,20 @@ export function WalletPanel({ checkout }: { checkout: CheckoutView }) {
                   void sendPayment();
                 }}
               >
-                Send {formatExactAmount(checkout.requestedAmount.display)} {checkout.asset.symbol}
+                Send {formatExactAmount(outstandingDisplay)} {checkout.asset.symbol}
               </Button>
+            )}
+
+            {sentReference === null && isFullyFunded && (
+              <div className="rounded-lg border border-status-completed bg-status-completed-soft px-3 py-2.5">
+                <p className="text-sm font-medium text-status-completed">
+                  This payment is already funded.
+                </p>
+                <p className="mt-1 text-xs text-text-muted">
+                  The full amount has been received and is confirming. Sending again would transfer
+                  a second time, and this page will not ask you to.
+                </p>
+              </div>
             )}
 
             {sentReference !== null && (
