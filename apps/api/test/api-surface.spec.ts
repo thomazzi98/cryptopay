@@ -526,9 +526,12 @@ describe('signing secrets', () => {
 describe('retiring a signing secret across environments', () => {
   it('refuses a live secret to a test key', async () => {
     const liveKey = await issueKey(MERCHANT_ID, 'live');
-    const liveSecret = 'whs_01K4QW6ZR2M8X4T7YQ0C3E2001';
-    const spare = 'whs_01K4QW6ZR2M8X4T7YQ0C3E2002';
-    for (const identifier of [liveSecret, spare]) {
+    // Row identifiers, not secret material, and named for what they hold. A variable whose name
+    // says secret, bound to a high-entropy literal, is exactly what a credential scanner is built
+    // to find; teaching the scanner to ignore it costs more than saying what the value is.
+    const liveIdentifier = 'whs_01K4QW6ZR2M8X4T7YQ0C3E2001';
+    const spareIdentifier = 'whs_01K4QW6ZR2M8X4T7YQ0C3E2002';
+    for (const identifier of [liveIdentifier, spareIdentifier]) {
       await pool.query(
         `INSERT INTO webhook_secrets (id, merchant_id, environment, secret)
          VALUES ($1, $2, 'live', $3)`,
@@ -538,21 +541,21 @@ describe('retiring a signing secret across environments', () => {
 
     const refused = await server.inject({
       method: 'DELETE',
-      url: `/v1/webhooks/secrets/${liveSecret}`,
+      url: `/v1/webhooks/secrets/${liveIdentifier}`,
       headers: { authorization: `Bearer ${testKey}` },
     });
     expect(refused.statusCode).toBe(422);
 
     const stored = await pool.query<{ retired_at: Date | null }>(
       'SELECT retired_at FROM webhook_secrets WHERE id = $1',
-      [liveSecret],
+      [liveIdentifier],
     );
     expect(stored.rows[0]?.retired_at).toBeNull();
 
     // The live key that owns it can still retire it, so the guard scopes rather than forbids.
     const allowed = await server.inject({
       method: 'DELETE',
-      url: `/v1/webhooks/secrets/${liveSecret}`,
+      url: `/v1/webhooks/secrets/${liveIdentifier}`,
       headers: { authorization: `Bearer ${liveKey}` },
     });
     expect(allowed.statusCode).toBe(204);

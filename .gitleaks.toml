@@ -1,13 +1,17 @@
 # gitleaks runs in CI as a second opinion beside `npm run scan:secrets`, which enforces this
 # project's own patterns. Every default gitleaks rule is kept.
 #
-# The one allowlist below is a literal from the integration guide. gitleaks' generic-api-key rule
-# fires on anything shaped `Key: <high-entropy value>`, and an `Idempotency-Key` header value is a
-# string the merchant invents for one request: it authenticates nothing, grants nothing, and is
-# meaningless to anyone who does not already hold the API key.
-#
-# It is allowlisted as an exact string rather than by path. A path allowlist would silence every
+# The two allowlists below are exact literals, never paths. A path allowlist would silence every
 # future finding in that file, which is how a scanner stops being a scanner.
+#
+# The first is from the integration guide. gitleaks' generic-api-key rule fires on anything shaped
+# `Key: <high-entropy value>`, and an `Idempotency-Key` header value is a string the merchant
+# invents for one request: it authenticates nothing, grants nothing, and is meaningless to anyone
+# who does not already hold the API key.
+#
+# The second is a `webhook_secrets` row identifier in a test, which a since-corrected variable name
+# announced as a secret. The name is fixed in the tree; the commit that introduced it is not, and
+# history is scanned deliberately.
 
 title = "CryptoPay"
 
@@ -15,5 +19,8 @@ title = "CryptoPay"
 useDefault = true
 
 [allowlist]
-description = "The documented Idempotency-Key example, which is not a credential"
-regexes = ['''Idempotency-Key: order-10422-attempt-1''']
+description = "Literals that are identifiers or examples, not credentials"
+regexes = [
+  '''Idempotency-Key: order-10422-attempt-1''',
+  '''whs_01K4QW6ZR2M8X4T7YQ0C3E2001''',
+]
