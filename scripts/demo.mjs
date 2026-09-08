@@ -218,6 +218,14 @@ async function main() {
     });
   }
 
+  console.log('Starting the dashboard...');
+  run('npm', ['run', 'start', '--workspace', 'apps/web'], {
+    NODE_ENV: 'production',
+    CRYPTOPAY_API_URL: 'http://127.0.0.1:3001',
+    PORT: '3000',
+  });
+  await waitForHealth('http://127.0.0.1:3000/connect', 'The dashboard');
+
   if (commandToExecute !== null) {
     // The key never touches disk: it goes straight into the child's environment and dies with it.
     console.log(`Running: ${commandToExecute.join(' ')}
@@ -238,14 +246,6 @@ async function main() {
     await shutDown(code);
     return;
   }
-
-  console.log('Starting the dashboard...');
-  run('npm', ['run', 'start', '--workspace', 'apps/web'], {
-    NODE_ENV: 'production',
-    CRYPTOPAY_API_URL: 'http://127.0.0.1:3001',
-    PORT: '3000',
-  });
-  await waitForHealth('http://127.0.0.1:3000/connect', 'The dashboard');
 
   const rule = '-'.repeat(60);
   console.log(`\n${rule}`);

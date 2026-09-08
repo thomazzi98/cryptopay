@@ -379,6 +379,17 @@ export default typescriptEslint.config(
     rules: { 'unicorn/filename-case': 'off' },
   },
 
+  /**
+   * A callback passed to `page.evaluate` is serialized and run inside the browser, where `document`
+   * and `window` are exactly the globals it needs. The rule is right that the function is isolated
+   * and wrong about the consequence, so it is disabled only here, where every isolated function is
+   * deliberately one.
+   */
+  {
+    files: ['e2e/**/*.ts'],
+    rules: { 'unicorn/isolated-functions': 'off' },
+  },
+
   // The domain layer is pure: it may reach for node builtins and packages/shared, nothing else.
   {
     files: ['apps/api/src/domain/**/*.ts'],

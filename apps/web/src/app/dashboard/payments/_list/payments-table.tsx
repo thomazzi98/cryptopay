@@ -90,7 +90,11 @@ function PaymentRow({ payment }: { payment: Payment }) {
 
       <span className="tabular text-text-muted">{formatShortTimestamp(payment.createdAt)}</span>
 
-      <span className="tabular truncate font-mono text-xs text-text-subtle">
+      {/* The elided form is for scanning; the title carries the value someone needs to paste. */}
+      <span
+        title={payment.identifier}
+        className="tabular truncate font-mono text-xs text-text-subtle"
+      >
         {truncateReference(payment.identifier, 10, 6)}
       </span>
     </Link>
