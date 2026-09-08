@@ -63,6 +63,11 @@ export type ScanOutcome =
       readonly paymentsAffected: number;
     }
   | { readonly kind: 'halted'; readonly reason: string }
+  /**
+   * The window read back inconsistently and was discarded rather than committed. Not an error and
+   * not a halt: the same range is read again next tick, against a chain that has settled.
+   */
+  | { readonly kind: 'discarded'; readonly reason: string }
   /** Another worker holds the lease. Every write this tick attempted affected zero rows. */
   | { readonly kind: 'lease_lost' };
 
@@ -155,6 +160,11 @@ export class ScanNetworkUseCase {
       progress.tip.height,
       watchedAccounts,
     );
+    const incoherent = this.findIncoherentTransfer(attempt.result);
+    if (incoherent !== null) {
+      return { kind: 'discarded', reason: incoherent };
+    }
+
     const transfers = await this.classifyObservedTransfers(attempt.result);
 
     const committed = await this.dependencies.chainScanStore.commitScannedWindow({
@@ -313,6 +323,50 @@ export class ScanNetworkUseCase {
       return range;
     }
     return Math.min(this.policy.maximumScanRange, range * 2);
+  }
+
+  /**
+   * Checks that every transfer in the window came from the block the window's own headers describe.
+   *
+   * Logs and headers are read in separate requests, seconds apart on a slow endpoint. A reorg
+   * between them produces a result that looks perfectly consistent and is not: the transfer carries
+   * the reference of a block that no longer exists, while the header recorded for that height is its
+   * replacement. Fork resolution walks headers alone, so it compares the replacement against the
+   * chain, finds them equal, and never rewinds. The credited transfer then stays credited forever —
+   * either double counted when the transaction is re-mined at a different position, or counted once
+   * for money that never arrived.
+   *
+   * A transfer below the header range needs no check. `headerDepth` is the configured reorg depth
+   * plus one, so anything the window carries no header for is deeper than a reorg is allowed to
+   * reach, and its block reference cannot change.
+   *
+   * Disagreement is answered by not committing. The identical range is read again on the next tick,
+   * against a chain that has settled, and the second read agrees with itself.
+   */
+  private findIncoherentTransfer(result: TransferScanResult): string | null {
+    if (result.transfers.length === 0) {
+      return null;
+    }
+
+    const referenceByHeight = new Map(
+      result.headers.map((header) => [header.position.height, header.position.reference]),
+    );
+    const lowestHeader = result.headers.at(0)?.position.height ?? null;
+
+    for (const transfer of result.transfers) {
+      const expected = referenceByHeight.get(transfer.position.height);
+      if (expected === undefined) {
+        if (lowestHeader !== null && transfer.position.height < lowestHeader) {
+          continue;
+        }
+        return `no header covers height ${transfer.position.height.toString()}, which carries transfer ${transfer.reference.transactionReference}`;
+      }
+      if (expected !== transfer.position.reference) {
+        return `transfer ${transfer.reference.transactionReference} reports block ${transfer.position.reference} at height ${transfer.position.height.toString()}, where the header says ${expected}`;
+      }
+    }
+
+    return null;
   }
 
   private async classifyObservedTransfers(

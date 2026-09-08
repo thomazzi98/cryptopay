@@ -135,6 +135,11 @@ export class NetworkWorker {
     if (scan.kind === 'halted') {
       return { kind: 'worked', scan, evaluation: null };
     }
+    // The window was thrown away because it read back inconsistently. Evaluating now would judge
+    // payments against observations the scanner has just refused to trust.
+    if (scan.kind === 'discarded') {
+      return { kind: 'worked', scan, evaluation: null };
+    }
 
     const evaluation = await this.dependencies.evaluator.execute();
     this.reportEvaluation(evaluation);
@@ -228,6 +233,15 @@ export class NetworkWorker {
     if (outcome.kind === 'halted') {
       // Halting is a decision that needs a human, so it is logged at the level that pages one.
       logger.error({ network: this.network, reason: outcome.reason }, 'Scanning is halted');
+      return;
+    }
+    // Loud, because a window that reads back inconsistently means the endpoint served a fork or a
+    // reorg landed mid-read. One is routine and self-correcting; a run of them is not.
+    if (outcome.kind === 'discarded') {
+      logger.warn(
+        { event: 'scan.window_discarded', network: this.network, reason: outcome.reason },
+        'A scanned window was discarded because a transfer disagreed with its own block header',
+      );
       return;
     }
     if (outcome.kind === 'rewound') {

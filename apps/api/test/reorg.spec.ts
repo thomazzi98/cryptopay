@@ -387,3 +387,95 @@ describe('a reorg deeper than the limit', () => {
     expect(resumed.haltedAt).toBeNull();
   });
 });
+
+/**
+ * The reorg that happens between reading the logs and reading the headers.
+ *
+ * This one cannot be produced by rewriting history, because it is a race inside a single scan: the
+ * logs come from one request and the headers from another, seconds later on a slow endpoint. If a
+ * block is replaced in between, the result is internally inconsistent and looks perfectly fine — the
+ * transfer carries a block reference that no longer exists, while the header recorded for that
+ * height is its replacement. Fork resolution walks headers alone, compares the replacement against
+ * the chain, finds them equal, and never rewinds.
+ *
+ * So the inconsistency is injected rather than raced for: one real scan result, one field changed,
+ * everything else genuine. That is the same shape the resilience suite uses, and it is the only way
+ * to assert on a window this code must refuse.
+ */
+function scannerWithCorruptedTransferReference(corrupt: boolean) {
+  const honest = new EvmChainGateway({
+    networkIdentifier: 'local-anvil',
+    chainIdentifier: 31_337,
+    rpcUrls: [rpcUrl],
+    supportsFinalityTag: false,
+  });
+
+  const gateway = Object.create(honest) as EvmChainGateway;
+  gateway.scanIncomingTransfers = async (request) => {
+    const result = await honest.scanIncomingTransfers(request);
+    if (!corrupt || result.transfers.length === 0) {
+      return result;
+    }
+    return {
+      ...result,
+      transfers: result.transfers.map((transfer) => ({
+        ...transfer,
+        position: { ...transfer.position, reference: `0x${'e'.repeat(64)}` },
+      })),
+    };
+  };
+
+  return new ScanNetworkUseCase({
+    gateway,
+    paymentRepository: new PaymentRepository(pool),
+    paymentTransferRepository: transfers,
+    blockCursorRepository: cursors,
+    observedBlockRepository: new ObservedBlockRepository(pool),
+    chainScanStore: new ChainScanStore(pool),
+    ulidFactory: new UlidFactory(),
+    now: () => new Date(),
+  });
+}
+
+describe('a scan whose logs and headers disagree', () => {
+  it('refuses the window, credits nothing, and leaves the cursor where it was', async () => {
+    const account = anvilAccount(24).address.toLowerCase();
+    const paymentId = await insertPayment(account);
+    await payTo(account, 25_000_000n);
+
+    const before = await readCursor();
+    const outcome = await scannerWithCorruptedTransferReference(true).execute(FENCING_TOKEN);
+
+    expect(outcome.kind).toBe('discarded');
+    const stored = await pool.query('SELECT 1 FROM payment_transfers WHERE payment_id = $1', [
+      paymentId,
+    ]);
+    expect(stored.rowCount).toBe(0);
+    const after = await readCursor();
+    expect(after.lastScannedHeight).toBe(before.lastScannedHeight);
+    expect(after.haltedAt).toBeNull();
+  });
+
+  /**
+   * Discarding is not halting. The same range is read again, and once the endpoint answers
+   * consistently the money is credited exactly once.
+   */
+  it('credits the transfer on the next tick, once the reads agree', async () => {
+    const account = anvilAccount(25).address.toLowerCase();
+    const paymentId = await insertPayment(account);
+    await payTo(account, 25_000_000n);
+
+    const refused = await scannerWithCorruptedTransferReference(true).execute(FENCING_TOKEN);
+    expect(refused.kind).toBe('discarded');
+
+    const recovered = await scannerWithCorruptedTransferReference(false).execute(FENCING_TOKEN);
+    expect(recovered.kind).toBe('scanned');
+
+    const credited = await pool.query<{ amount: string }>(
+      'SELECT amount FROM payment_transfers WHERE payment_id = $1',
+      [paymentId],
+    );
+    expect(credited.rowCount).toBe(1);
+    expect(credited.rows[0]?.amount).toBe('25000000');
+  });
+});
