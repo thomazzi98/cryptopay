@@ -372,3 +372,37 @@ describe('reading balances', () => {
     expect(balance).toBe(0n);
   });
 });
+
+/**
+ * Why a header read failed decides what the caller does with the answer, so the adapter has to tell
+ * the two apart. Reporting an unreachable endpoint as a pruned block halted the whole network — and
+ * a halt freezes completion and expiry for every payment on it until an operator resumes it by hand.
+ */
+describe('a header read that fails', () => {
+  it('reports an unreachable endpoint as unavailable, not as a missing block', async () => {
+    // A port nothing is listening on. Real transport failure, no stubbing.
+    const unreachable = new EvmChainGateway({
+      networkIdentifier: 'local-anvil',
+      chainIdentifier: 31_337,
+      rpcUrls: ['http://127.0.0.1:1'],
+      supportsFinalityTag: false,
+    });
+
+    const lookup = await unreachable.readPositionAtHeight(1n);
+    expect(lookup.kind).toBe('unavailable');
+  });
+
+  /**
+   * A height the chain genuinely does not have is a different answer, and it must stay different:
+   * this is the one that means the history the scanner relies on is gone.
+   */
+  it('reports a height above the tip as absent', async () => {
+    const lookup = await gateway.readPositionAtHeight(99_999_999n);
+    expect(lookup.kind).toBe('absent');
+  });
+
+  it('still reads a height the chain does have', async () => {
+    const lookup = await gateway.readPositionAtHeight(1n);
+    expect(lookup.kind).toBe('present');
+  });
+});

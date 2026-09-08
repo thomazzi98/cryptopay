@@ -74,6 +74,8 @@ export type ScanOutcome =
 type ForkResolution =
   | { readonly kind: 'consistent' }
   | { readonly kind: 'forked'; readonly header: { height: bigint; reference: string } }
+  /** Nobody could answer. Change nothing, ask again next tick. */
+  | { readonly kind: 'undecided'; readonly reason: string }
   | { readonly kind: 'unresolvable'; readonly reason: string };
 
 export interface ScanNetworkDependencies {
@@ -116,6 +118,11 @@ export class ScanNetworkUseCase {
     const progress = await this.dependencies.gateway.readChainProgress();
 
     const fork = await this.resolveFork(cursor, progress.tip.height);
+    // Undecided is not a halt. Halting requires evidence that the history is unreachable, and an
+    // endpoint that did not answer is evidence of nothing.
+    if (fork.kind === 'undecided') {
+      return { kind: 'discarded', reason: `fork resolution could not complete: ${fork.reason}` };
+    }
     if (fork.kind === 'unresolvable') {
       await this.dependencies.blockCursorRepository.halt(this.network, fork.reason, fencingToken);
       return { kind: 'halted', reason: fork.reason };
@@ -225,6 +232,11 @@ export class ScanNetworkUseCase {
       }
 
       const lookup = await this.dependencies.gateway.readPositionAtHeight(header.height);
+      // Nobody answered. That is not evidence of anything about the chain, so the tick ends without
+      // deciding: halting here would stop every payment on the network over a rate limit.
+      if (lookup.kind === 'unavailable') {
+        return { kind: 'undecided', reason: lookup.reason };
+      }
       if (lookup.kind === 'absent') {
         return {
           kind: 'unresolvable',
@@ -260,6 +272,9 @@ export class ScanNetworkUseCase {
     }
     const anchorHeight = oldest.height - 1n;
     const anchor = await this.dependencies.gateway.readPositionAtHeight(anchorHeight);
+    if (anchor.kind === 'unavailable') {
+      return { kind: 'undecided', reason: anchor.reason };
+    }
     if (anchor.kind !== 'present') {
       return {
         kind: 'unresolvable',

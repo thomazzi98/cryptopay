@@ -15,6 +15,10 @@ import {
   getAddress,
   http,
   parseAbiItem,
+  BaseError,
+  HttpRequestError,
+  RpcRequestError,
+  TimeoutError,
   type Hex,
   type PublicClient,
 } from 'viem';
@@ -67,12 +71,39 @@ function toLedgerPosition(blockNumber: bigint, blockHash: string): LedgerPositio
 }
 
 /**
+ * Whether the endpoint failed to answer at all, as opposed to answering with a refusal.
+ *
+ * The distinction decides whether to shrink the window or to back off, and answering it wrongly is
+ * expensive in the direction that matters: treating a rate limit as a range refusal answers a
+ * struggling provider with a burst of ever-smaller queries, and then leaves the range crawling back
+ * up over dozens of clean ticks.
+ *
+ * This reads the error's type, never its text.
+ */
+function isTransportFailure(error: unknown): boolean {
+  if (!(error instanceof BaseError)) {
+    return false;
+  }
+  return (
+    error.walk(
+      (candidate) =>
+        candidate instanceof HttpRequestError ||
+        candidate instanceof TimeoutError ||
+        candidate instanceof RpcRequestError,
+    ) !== null
+  );
+}
+
+/**
  * Provider range limits are discovered by shrinking, never by reading the error text. Endpoints
  * disagree about the wording and about the limit they name; one rejects a 500-block query with a
  * message quoting 10 000. A parser that believes the message loops forever.
+ *
+ * A transport failure is not a range refusal. It is rethrown so the tick backs off instead of
+ * hammering an endpoint that is already struggling.
  */
 function isRangeRejection(error: unknown): boolean {
-  return error instanceof Error;
+  return error instanceof Error && !isTransportFailure(error);
 }
 
 export class EvmChainGateway implements ChainGateway {
@@ -159,9 +190,22 @@ export class EvmChainGateway implements ChainGateway {
           parentReference: block.parentHash.toLowerCase(),
         },
       };
-    } catch {
-      // An EVM chain has a block at every height, so a height it cannot answer for is one the node
-      // has pruned rather than one that was skipped.
+    } catch (error) {
+      // Why the question failed decides what the caller does about it, so the two causes are kept
+      // apart. An endpoint that did not answer is asked again next tick; a block the node no longer
+      // retains means the history this system relies on is gone, and scanning has to stop.
+      //
+      // Collapsing both into 'absent' meant a rate limit or a timeout during fork resolution halted
+      // the network, which freezes completion and expiry for every payment on it until an operator
+      // resumes it by hand.
+      if (isTransportFailure(error)) {
+        return {
+          kind: 'unavailable',
+          reason: error instanceof BaseError ? error.shortMessage : 'the endpoint did not answer',
+        };
+      }
+      // An EVM chain has a block at every height, so a height the node answered about and does not
+      // have is one it pruned rather than one that was skipped.
       return { kind: 'absent' };
     }
   }

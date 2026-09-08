@@ -1,9 +1,15 @@
 import { Writable } from 'node:stream';
 
+import { HttpRequestError } from 'viem';
 import { describe, expect, it } from 'vitest';
 
 import { loadConfiguration } from '../configuration.js';
-import { createLogger, currentRequestContext, runWithRequestContext } from './logger.js';
+import {
+  createLogger,
+  currentRequestContext,
+  redactUrls,
+  runWithRequestContext,
+} from './logger.js';
 
 const REQUIRED_ENVIRONMENT = {
   NODE_ENV: 'test',
@@ -128,5 +134,92 @@ describe('request correlation', () => {
       });
       expect(currentRequestContext()?.requestId).toBe('outer');
     });
+  });
+});
+
+/**
+ * The leak that made this necessary: an RPC provider puts the API key in the URL path, a failing
+ * endpoint raises an error carrying that URL in three separate fields, and the worker logs the whole
+ * error on every failed tick. A key in a log aggregator is a key held by everyone who can read logs,
+ * which in any real deployment is a much wider group than everyone who can read the environment.
+ */
+describe('errors that carry a provider URL', () => {
+  it('keeps the host and drops everything that authenticates', () => {
+    expect(redactUrls('https://polygon-mainnet.g.alchemy.com/v2/SECRETKEY123')).toBe(
+      'https://polygon-mainnet.g.alchemy.com/[redacted]',
+    );
+  });
+
+  it('leaves a bare origin alone, because there is nothing in it to leak', () => {
+    expect(redactUrls('https://polygon-bor-rpc.publicnode.com')).toBe(
+      'https://polygon-bor-rpc.publicnode.com',
+    );
+  });
+
+  it('drops a key passed as a query parameter', () => {
+    expect(redactUrls('https://rpc.example.com/?apiKey=SECRETKEY123')).toBe(
+      'https://rpc.example.com/[redacted]',
+    );
+  });
+
+  it('redacts every URL in a sentence, not only the first', () => {
+    const redacted = redactUrls(
+      'tried https://one.example.com/v2/AAA then https://two.example.com/v2/BBB',
+    );
+    expect(redacted).not.toContain('AAA');
+    expect(redacted).not.toContain('BBB');
+    expect(redacted).toContain('one.example.com');
+    expect(redacted).toContain('two.example.com');
+  });
+
+  it('writes no provider key when a real viem transport error is logged', () => {
+    const written = captureLogOutput((logger) => {
+      logger.error(
+        {
+          error: new HttpRequestError({
+            url: 'https://polygon-mainnet.g.alchemy.com/v2/SECRETKEY123',
+            status: 429,
+            details: 'rate limited',
+          }),
+          network: 'polygon-mainnet',
+        },
+        'The network tick failed',
+      );
+    });
+
+    const line = written.join('');
+    expect(line).not.toContain('SECRETKEY123');
+    // The host survives, because "this provider is rate limiting us" is the point of the line.
+    expect(line).toContain('alchemy.com');
+    expect(line).toContain('polygon-mainnet');
+  });
+
+  it('never renders the fields viem hangs credentials on', () => {
+    const written = captureLogOutput((logger) => {
+      logger.error(
+        {
+          error: new HttpRequestError({
+            url: 'https://rpc.example.com/v2/SECRETKEY123',
+            status: 500,
+            body: { method: 'eth_getLogs' },
+          }),
+        },
+        'failed',
+      );
+    });
+
+    const parsed = JSON.parse(written.join('')) as { error: Record<string, unknown> };
+    const fields = Object.keys(parsed.error).toSorted((left, right) => left.localeCompare(right));
+    expect(fields).toStrictEqual(['message', 'name', 'stack']);
+  });
+});
+
+describe('a secret nested deeper than one level', () => {
+  it('redacts a seed two levels down', () => {
+    const written = captureLogOutput((logger) => {
+      logger.info({ envelope: { wallet: { seed: 'a-plaintext-seed-value' } } }, 'provisioned');
+    });
+
+    expect(written.join('')).not.toContain('a-plaintext-seed-value');
   });
 });

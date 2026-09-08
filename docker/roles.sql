@@ -89,3 +89,27 @@ REVOKE ALL ON api_keys, webhook_secrets, webhook_deliveries, idempotency_records
 -- The settlement worker reads payments to find what is worth settling and must never change one.
 -- A sweep that failed cannot be allowed to make a completed payment uncertain again.
 REVOKE INSERT, UPDATE, DELETE ON payments FROM cryptopay_settlement_worker;
+
+-- Timeouts on the roles as well as on the connections the application opens.
+--
+-- The application sets these per connection, which is what protects the service. Setting them here
+-- too covers every other session: a psql window left open during an incident, a migration run by
+-- hand, a backup tool. Those are exactly the sessions that hold a lock nobody remembers taking.
+--
+-- Generous rather than tight. A timeout that fires during ordinary work is a timeout somebody
+-- removes, and then there is none at all.
+ALTER ROLE cryptopay_api SET statement_timeout = '30s';
+ALTER ROLE cryptopay_api SET lock_timeout = '10s';
+ALTER ROLE cryptopay_api SET idle_in_transaction_session_timeout = '60s';
+
+ALTER ROLE cryptopay_chain_worker SET statement_timeout = '60s';
+ALTER ROLE cryptopay_chain_worker SET lock_timeout = '10s';
+ALTER ROLE cryptopay_chain_worker SET idle_in_transaction_session_timeout = '120s';
+
+ALTER ROLE cryptopay_callback_worker SET statement_timeout = '30s';
+ALTER ROLE cryptopay_callback_worker SET lock_timeout = '10s';
+ALTER ROLE cryptopay_callback_worker SET idle_in_transaction_session_timeout = '60s';
+
+ALTER ROLE cryptopay_settlement_worker SET statement_timeout = '60s';
+ALTER ROLE cryptopay_settlement_worker SET lock_timeout = '10s';
+ALTER ROLE cryptopay_settlement_worker SET idle_in_transaction_session_timeout = '120s';

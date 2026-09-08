@@ -479,3 +479,71 @@ describe('a scan whose logs and headers disagree', () => {
     expect(credited.rows[0]?.amount).toBe('25000000');
   });
 });
+
+/**
+ * The difference between "the block is gone" and "nobody answered".
+ *
+ * Fork resolution reads block headers from the chain. When those reads failed, every cause was
+ * treated as a pruned node, and a pruned node is unresolvable: the network halted and stayed halted
+ * until an operator resumed it by hand. A halt freezes completion and expiry for every payment on
+ * that network, so a rate limit lasting seconds became an outage lasting until someone noticed.
+ */
+function scannerWhoseHeaderReadsFail(reason: string) {
+  const honest = new EvmChainGateway({
+    networkIdentifier: 'local-anvil',
+    chainIdentifier: 31_337,
+    rpcUrls: [rpcUrl],
+    supportsFinalityTag: false,
+  });
+
+  // The adapter's own classification is asserted separately, against a real unreachable endpoint.
+  // Here the question is what the use case does with the answer.
+  const gateway = Object.create(honest) as EvmChainGateway;
+  gateway.readPositionAtHeight = () => Promise.resolve({ kind: 'unavailable', reason });
+
+  return new ScanNetworkUseCase({
+    gateway,
+    paymentRepository: new PaymentRepository(pool),
+    paymentTransferRepository: transfers,
+    blockCursorRepository: cursors,
+    observedBlockRepository: new ObservedBlockRepository(pool),
+    chainScanStore: new ChainScanStore(pool),
+    ulidFactory: new UlidFactory(),
+    now: () => new Date(),
+  });
+}
+
+describe('an endpoint that stops answering during fork resolution', () => {
+  beforeEach(async () => {
+    // A header on record is what makes fork resolution run at all.
+    await mineBlocks(2);
+    await scanner.execute(FENCING_TOKEN);
+  });
+
+  it('does not halt the network when the endpoint times out', async () => {
+    const outcome =
+      await scannerWhoseHeaderReadsFail('the request timed out').execute(FENCING_TOKEN);
+
+    expect(outcome.kind).toBe('discarded');
+    const cursor = await readCursor();
+    expect(cursor.haltedAt).toBeNull();
+  });
+
+  it('does not halt the network when the endpoint refuses the request', async () => {
+    const outcome = await scannerWhoseHeaderReadsFail('rate limited').execute(FENCING_TOKEN);
+
+    expect(outcome.kind).toBe('discarded');
+    const cursor = await readCursor();
+    expect(cursor.haltedAt).toBeNull();
+  });
+
+  it('scans normally again once the endpoint recovers', async () => {
+    await scannerWhoseHeaderReadsFail('the request timed out').execute(FENCING_TOKEN);
+    await mineBlocks(1);
+
+    const recovered = await scanner.execute(FENCING_TOKEN);
+    expect(recovered.kind).toBe('scanned');
+    const cursor = await readCursor();
+    expect(cursor.haltedAt).toBeNull();
+  });
+});

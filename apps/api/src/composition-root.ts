@@ -71,7 +71,10 @@ export interface Application {
 export function composeApplication(source: NodeJS.ProcessEnv): Application {
   const configuration = loadConfiguration(source);
   const logger = createLogger(configuration);
-  const databasePool = createDatabasePool(configuration);
+  const databasePool = createDatabasePool(configuration, {
+    applicationName: 'cryptopay-api',
+    logger,
+  });
 
   return {
     configuration,
@@ -166,7 +169,10 @@ export function composeCallbackWorker(
 ): BackgroundWorker {
   const configuration = loadConfiguration(source);
   const logger = createLogger(configuration);
-  const databasePool = createDatabasePool(configuration);
+  const databasePool = createDatabasePool(configuration, {
+    applicationName: 'cryptopay-callback-worker',
+    logger,
+  });
 
   const deliverer = new DeliverCallbacksUseCase({
     webhookDeliveryRepository: new WebhookDeliveryRepository(databasePool),
@@ -212,7 +218,10 @@ export function composeChainWorker(
 ): BackgroundWorker {
   const configuration = loadConfiguration(source);
   const logger = createLogger(configuration);
-  const databasePool = createDatabasePool(configuration);
+  const databasePool = createDatabasePool(configuration, {
+    applicationName: 'cryptopay-chain-worker',
+    logger,
+  });
 
   if (configuration.localAnvilUsdcAddress !== undefined) {
     registerLocalDevelopmentAsset({
@@ -319,7 +328,10 @@ export async function composeSettlementWorker(
 ): Promise<BackgroundWorker> {
   const configuration = loadConfiguration(source);
   const logger = createLogger(configuration);
-  const databasePool = createDatabasePool(configuration);
+  const databasePool = createDatabasePool(configuration, {
+    applicationName: 'cryptopay-settlement-worker',
+    logger,
+  });
 
   if (configuration.localAnvilUsdcAddress !== undefined) {
     registerLocalDevelopmentAsset({

@@ -28,7 +28,13 @@ export type LedgerPositionLookup =
    */
   | { readonly kind: 'skipped' }
   /** Below the first height this node still retains. */
-  | { readonly kind: 'absent' };
+  | { readonly kind: 'absent' }
+  /**
+   * No endpoint could answer. Distinct from 'absent' because the responses are opposite: a pruned
+   * height means the history is unreachable and scanning must stop, while an endpoint that did not
+   * answer means try again shortly. Collapsing the two turns a rate limit into a halted network.
+   */
+  | { readonly kind: 'unavailable'; readonly reason: string };
 
 export type TransferReconciliation =
   | { readonly kind: 'present'; readonly position: LedgerPosition }
