@@ -41,13 +41,28 @@ export class ApplicationError extends Error {
   readonly code: ProblemCode;
   readonly detail: string;
   readonly issues: readonly ValidationIssue[];
+  /**
+   * A more specific name for the same failure, for the gateway surface.
+   *
+   * The problem catalogue is deliberately small: eight codes a dashboard can branch on. An
+   * orchestrator integrating over `/api/v1` needs to tell an unsupported currency from an amount it
+   * cannot express, and both are `validation_failed` here. Carrying the finer name on the error
+   * keeps one catalogue with one place that raises each failure, rather than two that drift.
+   */
+  readonly gatewayCode: string | null;
 
-  constructor(code: ProblemCode, detail: string, issues: readonly ValidationIssue[] = []) {
+  constructor(
+    code: ProblemCode,
+    detail: string,
+    issues: readonly ValidationIssue[] = [],
+    gatewayCode: string | null = null,
+  ) {
     super(`${code}: ${detail}`);
     this.name = 'ApplicationError';
     this.code = code;
     this.detail = detail;
     this.issues = issues;
+    this.gatewayCode = gatewayCode;
   }
 
   get status(): number {

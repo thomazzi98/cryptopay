@@ -17,6 +17,12 @@ import {
   type RegisteredRoute,
 } from './openapi.js';
 import {
+  GATEWAY_ERROR_CONTENT_TYPE,
+  isGatewayRequest,
+  toGatewayError,
+  toUnexpectedGatewayError,
+} from './gateway-error.js';
+import {
   ApplicationError,
   PROBLEM_CONTENT_TYPE,
   toProblemDetails,
@@ -30,6 +36,7 @@ import type { WebhookDeliveryRepository } from '../infrastructure/persistence/we
 import type { WebhookSecretRepository } from '../infrastructure/persistence/webhook-secret.repository.js';
 import type { UlidFactory } from '../infrastructure/system/ulid.js';
 import { registerCheckoutRoutes } from './routes/checkout.routes.js';
+import { registerGatewayPaymentRoutes } from './routes/gateway-payments.routes.js';
 import { registerHealthRoutes } from './routes/health.routes.js';
 import { registerMerchantRoutes } from './routes/merchants.routes.js';
 import { registerNetworkRoutes } from './routes/networks.routes.js';
@@ -162,20 +169,32 @@ export function buildServer(dependencies: ServerDependencies): ApplicationServer
   });
 
   server.setNotFoundHandler((request, reply) => {
-    const problem = toProblemDetails(
-      new ApplicationError(
-        'resource_not_found',
-        `No route matches ${request.method} ${request.url}`,
-      ),
-      request.id,
-      request.url,
+    const notFound = new ApplicationError(
+      'resource_not_found',
+      `No route matches ${request.method} ${request.url}`,
     );
+    if (isGatewayRequest(request.url)) {
+      const rendered = toGatewayError(notFound, request.id);
+      void reply.code(rendered.status).type(GATEWAY_ERROR_CONTENT_TYPE).send(rendered.body);
+      return;
+    }
+    const problem = toProblemDetails(notFound, request.id, request.url);
     void reply.code(problem.status).type(PROBLEM_CONTENT_TYPE).send(problem);
   });
 
   server.setErrorHandler((error, request, reply) => {
+    // The two surfaces render the same failure differently and decide nothing differently. A
+    // response that leaked a problem+json body into the gateway contract would be a contract break
+    // reported as an error, which is the worst moment to break a contract.
+    const asGateway = isGatewayRequest(request.url);
+
     if (error instanceof ApplicationError) {
       request.log.warn({ event: 'http.request_rejected', code: error.code }, error.detail);
+      if (asGateway) {
+        const rendered = toGatewayError(error, request.id);
+        void reply.code(rendered.status).type(GATEWAY_ERROR_CONTENT_TYPE).send(rendered.body);
+        return;
+      }
       const problem = toProblemDetails(error, request.id, request.url);
       void reply.code(problem.status).type(PROBLEM_CONTENT_TYPE).send(problem);
       return;
@@ -185,11 +204,13 @@ export function buildServer(dependencies: ServerDependencies): ApplicationServer
     if (statusCode < DEFAULT_ERROR_STATUS) {
       const message = readMessage(error);
       request.log.warn({ event: 'http.request_rejected', statusCode }, message);
-      const problem = toProblemDetails(
-        new ApplicationError('malformed_request', message),
-        request.id,
-        request.url,
-      );
+      const malformed = new ApplicationError('malformed_request', message);
+      if (asGateway) {
+        const rendered = toGatewayError(malformed, request.id);
+        void reply.code(rendered.status).type(GATEWAY_ERROR_CONTENT_TYPE).send(rendered.body);
+        return;
+      }
+      const problem = toProblemDetails(malformed, request.id, request.url);
       void reply.code(problem.status).type(PROBLEM_CONTENT_TYPE).send(problem);
       return;
     }
@@ -197,6 +218,11 @@ export function buildServer(dependencies: ServerDependencies): ApplicationServer
     // The client gets a request identifier and nothing else. A driver message or a stack trace
     // leaks table names, file paths and occasionally credentials.
     request.log.error({ event: 'http.request_failed', error }, 'unhandled error');
+    if (asGateway) {
+      const rendered = toUnexpectedGatewayError(request.id);
+      void reply.code(rendered.status).type(GATEWAY_ERROR_CONTENT_TYPE).send(rendered.body);
+      return;
+    }
     const problem = toUnexpectedProblemDetails(request.id);
     void reply.code(problem.status).type(PROBLEM_CONTENT_TYPE).send(problem);
   });
@@ -229,6 +255,16 @@ export function buildServer(dependencies: ServerDependencies): ApplicationServer
     checkoutBaseUrl: configuration.publicCheckoutBaseUrl,
     paymentTransferRepository: dependencies.paymentTransferRepository,
     webhookDeliveryRepository: dependencies.webhookDeliveryRepository,
+  });
+  registerGatewayPaymentRoutes(server, {
+    authenticate,
+    paymentCreator: dependencies.paymentCreator,
+    paymentCanceler: dependencies.paymentCanceler,
+    paymentRepository: dependencies.paymentRepository,
+    merchantRepository,
+    idempotencyRepository: dependencies.idempotencyRepository,
+    paymentTransferRepository: dependencies.paymentTransferRepository,
+    blockCursorRepository: dependencies.blockCursorRepository,
   });
   registerCheckoutRoutes(server, {
     paymentRepository: dependencies.paymentRepository,

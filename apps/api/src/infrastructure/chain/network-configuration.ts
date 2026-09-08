@@ -235,6 +235,28 @@ export function requireEvmChainId(configuration: NetworkConfiguration): number {
   return configuration.evmChainId;
 }
 
+/**
+ * Turns the family a caller names into the deployment their key is allowed to reach.
+ *
+ * The gateway contract deliberately takes `polygon` rather than `polygon-mainnet`, so which chain a
+ * payment lands on follows from the API key's environment rather than from the request body. A test
+ * key cannot ask for mainnet, because mainnet is not a word it can say.
+ */
+export function resolveNetwork(
+  family: NetworkFamily,
+  environment: Environment,
+): NetworkConfiguration | null {
+  const candidates = Object.values(NETWORK_CONFIGURATIONS).filter(
+    (configuration) =>
+      configuration.networkFamily === family && configuration.environment === environment,
+  );
+  const preferred = candidates.find(
+    (configuration) => configuration.networkIdentifier !== 'local-anvil',
+  );
+  const chosen = preferred ?? candidates[0];
+  return chosen === undefined ? null : networkConfigurationFor(chosen.networkIdentifier);
+}
+
 export function networksForEnvironment(environment: Environment): readonly NetworkConfiguration[] {
   return Object.values(NETWORK_CONFIGURATIONS)
     .filter((configuration) => configuration.environment === environment)

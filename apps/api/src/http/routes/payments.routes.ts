@@ -63,6 +63,7 @@ const FAILURE_CODES: Readonly<Record<CreatePaymentFailure['reason'], ProblemCode
   invalid_amount: 'validation_failed',
   network_not_watched: 'service_unavailable',
   unreachable_callback: 'validation_failed',
+  duplicate_external_reference: 'validation_failed',
 });
 
 function readIdempotencyKey(headerValue: unknown): string {

@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import { PaymentSchema } from './api-contracts.js';
+import { GatewayPaymentSchema } from './gateway-contracts.js';
 
 /**
  * The OpenAPI document, generated from the same zod schemas the server validates with.
@@ -100,6 +101,136 @@ const NOT_FOUND = problem(
   'No such resource for this key. Another merchant resource answers 404 rather than 403, because 403 would confirm the identifier exists.',
 );
 const VALIDATION_FAILED = problem(422, 'The request is well formed but cannot be accepted.');
+
+/**
+ * The gateway surface answers in its own envelope rather than RFC 9457, so its failures reference a
+ * different schema. Both are rendered from one catalogue; only the shape differs.
+ */
+const gatewayFailure = (status: number, description: string): ResponseDefinition => ({
+  status,
+  description,
+  schema: 'GatewayError',
+});
+
+const GATEWAY_UNAUTHORIZED = gatewayFailure(401, 'The API key is missing, unknown, or retired.');
+const GATEWAY_NOT_FOUND = gatewayFailure(
+  404,
+  'No such payment for this key. A payment belonging to another merchant answers 404 rather than 403, because 403 would confirm the identifier exists.',
+);
+
+const IDEMPOTENCY_KEY_PARAMETER = {
+  name: 'Idempotency-Key',
+  location: 'header' as const,
+  required: true,
+  description:
+    'Any unique string up to 255 characters. Reusing one with a different body is rejected rather than silently creating a second payment.',
+  schema: { type: 'string', maxLength: 255 },
+};
+
+const PAYMENT_ID_PARAMETER = {
+  name: 'paymentId',
+  location: 'path' as const,
+  required: true,
+  description: 'The payment identifier returned when the payment was created.',
+  schema: { type: 'string' },
+};
+
+const GATEWAY_OPERATIONS: readonly OperationDefinition[] = [
+  {
+    method: 'post',
+    path: '/api/v1/payments',
+    operationId: 'createGatewayPayment',
+    tag: 'Gateway',
+    summary: 'Create a payment',
+    description:
+      'Creates a payment intent, allocates a destination for it alone, and returns the payment URI and QR code for the chosen network. The caller names a chain family and a logical currency; which deployment of that family is used follows from the API key environment, so a test key cannot create a mainnet payment. The Idempotency-Key header is required.',
+    authenticated: true,
+    parameters: [IDEMPOTENCY_KEY_PARAMETER],
+    requestBody: 'CreateGatewayPaymentRequest',
+    responses: [
+      { status: 201, description: 'The payment was created.', schema: 'GatewayPayment' },
+      GATEWAY_UNAUTHORIZED,
+      gatewayFailure(422, 'The payment could not be created from this request.'),
+      gatewayFailure(
+        429,
+        'An identical request is already in flight. Honour Retry-After and retry; the eventual answer is the same payment.',
+      ),
+      gatewayFailure(503, 'This environment cannot currently issue payment destinations.'),
+    ],
+  },
+  {
+    method: 'get',
+    path: '/api/v1/payments/{paymentId}',
+    operationId: 'getGatewayPayment',
+    tag: 'Gateway',
+    summary: 'Read a payment',
+    description:
+      'The whole payment, including every chain transaction seen against it. One payment can have several: a partial payment, a top-up, a duplicate, or a late arrival.',
+    authenticated: true,
+    parameters: [PAYMENT_ID_PARAMETER],
+    responses: [
+      { status: 200, description: 'The payment.', schema: 'GatewayPayment' },
+      GATEWAY_UNAUTHORIZED,
+      GATEWAY_NOT_FOUND,
+    ],
+  },
+  {
+    method: 'get',
+    path: '/api/v1/payments/{paymentId}/status',
+    operationId: 'getGatewayPaymentStatus',
+    tag: 'Gateway',
+    summary: 'Read a payment status',
+    description:
+      'The narrow answer a poller wants. Read amountReceived beside the state: PAID covers an exact payment and an overpayment alike.',
+    authenticated: true,
+    parameters: [PAYMENT_ID_PARAMETER],
+    responses: [
+      { status: 200, description: 'The current state.', schema: 'GatewayPaymentStatus' },
+      GATEWAY_UNAUTHORIZED,
+      GATEWAY_NOT_FOUND,
+    ],
+  },
+  {
+    method: 'post',
+    path: '/api/v1/payments/{paymentId}/cancel',
+    operationId: 'cancelGatewayPayment',
+    tag: 'Gateway',
+    summary: 'Cancel a payment',
+    description:
+      'Refused once any value has been observed against the payment, because cancelling a payment the customer has already funded would strand real money.',
+    authenticated: true,
+    parameters: [PAYMENT_ID_PARAMETER],
+    responses: [
+      { status: 200, description: 'The cancelled payment.', schema: 'GatewayPayment' },
+      GATEWAY_UNAUTHORIZED,
+      GATEWAY_NOT_FOUND,
+      gatewayFailure(422, 'This payment can no longer be cancelled.'),
+    ],
+  },
+  {
+    method: 'get',
+    path: '/health',
+    operationId: 'checkHealth',
+    tag: 'Operations',
+    summary: 'Liveness probe',
+    description: 'The documented name for the liveness probe. Identical to /healthz.',
+    authenticated: false,
+    responses: [{ status: 200, description: 'The process is alive.', schema: 'HealthReport' }],
+  },
+  {
+    method: 'get',
+    path: '/readiness',
+    operationId: 'checkReadinessAlias',
+    tag: 'Operations',
+    summary: 'Readiness probe',
+    description: 'The documented name for the readiness probe. Identical to /readyz.',
+    authenticated: false,
+    responses: [
+      { status: 200, description: 'Ready, possibly degraded.', schema: 'ReadinessReport' },
+      { status: 503, description: 'Not ready for traffic.', schema: 'ReadinessReport' },
+    ],
+  },
+];
 
 const OPERATIONS: readonly OperationDefinition[] = [
   {
@@ -580,6 +711,15 @@ function componentSchemas(): Record<string, JsonSchema> {
   if (anchor !== 'Payment') {
     throw new Error('The API contracts are not registered, so no OpenAPI document can be built.');
   }
+  // The gateway contracts register themselves the same way, and are a separate module, so they get
+  // their own anchor. Without one, a document built before that module loaded would silently omit
+  // every gateway schema and fail later with a dangling reference.
+  const gatewayAnchor = z.globalRegistry.get(GatewayPaymentSchema)?.id;
+  if (gatewayAnchor !== 'GatewayPayment') {
+    throw new Error(
+      'The gateway contracts are not registered, so no OpenAPI document can be built.',
+    );
+  }
 
   const convert = (io: 'input' | 'output') =>
     z.toJSONSchema(z.globalRegistry, {
@@ -653,7 +793,7 @@ export function buildOpenApiDocument(options: OpenApiOptions): Record<string, un
   const known = new Set(Object.keys(components));
 
   const paths: Record<string, Record<string, unknown>> = {};
-  for (const operation of OPERATIONS) {
+  for (const operation of [...OPERATIONS, ...GATEWAY_OPERATIONS]) {
     for (const identifier of referencedComponentIds(operation)) {
       if (!known.has(identifier)) {
         throw new Error(
@@ -722,5 +862,8 @@ export function buildOpenApiDocument(options: OpenApiOptions): Record<string, un
 
 /** Every operation the document declares. The API asserts at boot that it serves exactly these. */
 export function documentedOperations(): readonly DocumentedOperation[] {
-  return OPERATIONS.map((operation) => ({ method: operation.method, path: operation.path }));
+  return [...OPERATIONS, ...GATEWAY_OPERATIONS].map((operation) => ({
+    method: operation.method,
+    path: operation.path,
+  }));
 }

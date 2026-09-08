@@ -198,23 +198,134 @@ identifier exists, which is all an enumeration attack needs.
 
 ## Putting CryptoPay behind another gateway
 
-Everything a gateway needs to treat this as one of its payment methods is here, and none of it needs
-special access:
+There is a contract for exactly this, at `/api/v1`, and it is deliberately not the same surface as
+`/v1`. The two answer different questions. `/v1` serves a dashboard that wants the whole truth about
+a payment, including orphaned transfers and the internal status. `/api/v1` serves an orchestrator
+that wants to know what to show a customer and when to release goods, and wants to know it without
+learning anything about blockchains.
 
-- `GET /v1/networks` for the method list and its parameters, per environment.
-- `POST /v1/payments` with your own order id in `merchantReference` and your own fields in `metadata`,
-  both echoed on every webhook, so you never need a mapping table keyed on our identifiers.
-- `receivingAccount` and `requestedAmount.baseUnits` to render your own checkout, or `checkoutUrl` to
-  hand the customer ours.
-- `POST /v1/payments/{id}/cancel` while nothing has been credited. It fires `payment.canceled` like
-  any other change, so a gateway reconciling purely by webhook does not have to special-case the one
-  event it triggered itself.
-- `GET /v1/payments/{id}/deliveries` and `POST /v1/webhooks/deliveries/{id}/redeliver` to recover an
-  event your side lost, including one that already succeeded.
-- `GET /readyz` for your health dashboard: it reports per-network scan lag and whether a network is
-  halted, which is the failure that is otherwise invisible — payments keep being created and nothing
-  is ever detected.
+```http
+POST /api/v1/payments
+Authorization: Bearer cp_live_...
+Idempotency-Key: order_12345_attempt_1
+Content-Type: application/json
+
+{
+  "externalReference": "order_12345",
+  "network": "polygon",
+  "currency": "USDC",
+  "amount": "25.00",
+  "callbackUrl": "https://payment-gateway.example.com/webhooks/crypto",
+  "expiresIn": 1800,
+  "metadata": { "orderId": "12345" }
+}
+```
+
+```json
+{
+  "id": "pay_01K4QW6ZR2M8X4T7YQ0C3D5B9N",
+  "status": "CREATED",
+  "network": "polygon",
+  "chainId": 137,
+  "currency": "USDC",
+  "amount": "25.000000",
+  "amountReceived": "0.000000",
+  "paymentDestination": { "address": "0x...", "memo": null },
+  "paymentUri": "ethereum:0x3c49...@137/transfer?address=0x...&uint256=25000000",
+  "qrCode": "data:image/png;base64,...",
+  "expiresAt": "2026-09-08T15:30:00Z",
+  "explorer": { "address": "https://polygonscan.com/address/0x...", "transaction": null }
+}
+```
+
+Four things about that exchange are worth knowing before you build on it.
+
+**You name a chain family, not a deployment.** `network` is `polygon`, `tron` or `solana`. Which
+deployment of that family the payment lands on follows from the environment of the API key you used,
+so a `cp_test_` key has no way to spell mainnet. Ask `GET /v1/networks` for what a key can reach.
+
+**You name a currency, never a contract.** `currency` is `USDC`, `USDT`, `POL` and so on, and the
+field will not accept an address. The server resolves the pair to an asset. This is why the Polygon
+USDT contract reporting its symbol as `USDT0` is our problem rather than yours.
+
+**`paymentUri` and `qrCode` are already correct for the chain.** Polygon gets EIP-681, Solana gets
+Solana Pay, TRON gets the convention TRON wallets accept, because TRON has ratified no standard. Show
+the QR code, or hand the URI to a wallet deep link. You never branch on the network to do it.
+
+**`PAID` means paid, not paid exactly.** It covers an exact payment and an overpayment alike, so read
+`amountReceived` beside it if the difference matters to you. `FAILED` with
+`failureReason: "insufficient_amount"` is an underpayment: the money is real and is still at the
+destination, it simply never reached the acceptance band before the payment expired.
+
+### The lifecycle you have to handle
+
+```text
+CREATED ─────► WAITING_FOR_PAYMENT ─────► PAYMENT_DETECTED ─────► CONFIRMING ─────► PAID
+   │                   │                        │                      │
+   │                   ├──► EXPIRED             └──► FAILED            └──► FAILED
+   │                   └──► CANCELLED
+   └──► (may skip straight to PAYMENT_DETECTED or CONFIRMING)
+```
+
+Two shapes surprise people, and both are real rather than defensive. A single transfer that pays in
+full goes straight to `CONFIRMING` without ever being `PAYMENT_DETECTED`, so do not wait for a state
+you may never see. And a chain reorganisation can walk a payment _backwards_ — `CONFIRMING` to
+`PAYMENT_DETECTED`, or to `WAITING_FOR_PAYMENT` — because value that was on the chain no longer is.
+Treat state as the current answer rather than as a ratchet, and release goods on `PAID` alone.
+
+No state leaves `PAID`, `EXPIRED`, `CANCELLED` or `FAILED`. That is what makes it safe to act on them.
+
+### The rest of the surface
+
+- `GET /api/v1/payments/{id}` for the payment and every chain transaction seen against it. One
+  payment can have several: a partial payment, a top-up, a duplicate, or a late arrival.
+- `GET /api/v1/payments/{id}/status` for polling. It is the narrow answer, without the payload you
+  already hold.
+- `POST /api/v1/payments/{id}/cancel`, refused once any value has been observed, because cancelling a
+  payment the customer has already funded would strand real money.
+- `GET /health` and `GET /readiness` for your health dashboard. Readiness reports per-network scan lag
+  and whether a network has halted, which is the failure that is otherwise invisible: payments keep
+  being created and nothing is ever detected.
+
+### Idempotency
+
+`Idempotency-Key` is required on creation. The same merchant sending the same key with the same body
+receives the original payment and an `idempotency-replayed: true` header, however many times and
+however concurrently. The same key with a _different_ body is refused with
+`IDEMPOTENCY_KEY_CONFLICT` rather than being served the wrong payment.
+
+Separately, `externalReference` is unique per merchant per environment. A second payment for an
+order you already have one for is refused with `DUPLICATE_EXTERNAL_REFERENCE`, which is what stops a
+retried order becoming two payments for the same goods.
+
+### Errors
+
+Every failure on this surface has one shape:
+
+```json
+{
+  "error": {
+    "code": "INVALID_PAYMENT_AMOUNT",
+    "message": "The payment amount is invalid.",
+    "requestId": "d94b1c2e-..."
+  }
+}
+```
+
+Branch on `code`; the message is for a person reading a log and may be reworded. `requestId` matches
+the `x-request-id` response header and is what to quote when reporting a problem. Nothing else is
+ever present: no stack trace, no driver message, no internal class or table name.
+
+The codes creation can return are `VALIDATION_FAILED`, `INVALID_PAYMENT_AMOUNT`,
+`UNSUPPORTED_CURRENCY`, `UNSUPPORTED_NETWORK`, `NETWORK_NOT_PERMITTED`, `NETWORK_UNAVAILABLE`,
+`INVALID_CALLBACK_URL`, `DUPLICATE_EXTERNAL_REFERENCE`, `IDEMPOTENCY_KEY_REQUIRED`,
+`IDEMPOTENCY_KEY_CONFLICT` and `IDEMPOTENCY_KEY_IN_USE`. Reading a payment can return
+`PAYMENT_NOT_FOUND`; cancelling can also return `PAYMENT_NOT_CANCELLABLE`.
+
+A payment belonging to another merchant answers `PAYMENT_NOT_FOUND`, exactly as one that does not
+exist does. A 403 would confirm the identifier is real, which is the only thing an enumeration attack
+needs.
 
 The one thing to design for is the custody window: this system holds funds between crediting a
-payment and sweeping it, and sweeping is not implemented. See [limitations.md](limitations.md), which
-states that plainly rather than in a footnote.
+payment and sweeping it. See [limitations.md](limitations.md), which states the exposure plainly
+rather than in a footnote.

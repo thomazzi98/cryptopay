@@ -18,7 +18,10 @@ import {
 } from '../infrastructure/chain/network-configuration.js';
 import type { BlockCursorRepository } from '../infrastructure/persistence/block-cursor.repository.js';
 import type { Merchant } from '../infrastructure/persistence/merchant.repository.js';
-import type { PaymentRepository } from '../infrastructure/persistence/payment.repository.js';
+import {
+  DuplicateMerchantReferenceError,
+  type PaymentRepository,
+} from '../infrastructure/persistence/payment.repository.js';
 import type { WalletSeedRepository } from '../infrastructure/persistence/wallet-seed.repository.js';
 import type { HierarchicalDeterministicAllocator } from '../infrastructure/wallet/hierarchical-deterministic-allocator.js';
 import type { UlidFactory } from '../infrastructure/system/ulid.js';
@@ -34,7 +37,8 @@ export type CreatePaymentFailure =
   | { readonly reason: 'unknown_asset'; readonly detail: string }
   | { readonly reason: 'invalid_amount'; readonly detail: string }
   | { readonly reason: 'network_not_watched'; readonly detail: string }
-  | { readonly reason: 'unreachable_callback'; readonly detail: string };
+  | { readonly reason: 'unreachable_callback'; readonly detail: string }
+  | { readonly reason: 'duplicate_external_reference'; readonly detail: string };
 
 export type CreatePaymentResult =
   | { readonly kind: 'created'; readonly payment: Payment }
@@ -187,13 +191,28 @@ export class CreatePaymentUseCase {
             await onPersist(client, payment);
           };
 
-    await this.dependencies.paymentRepository.create({
-      payment,
-      address,
-      addressIdentifier: `adr_${this.dependencies.ulidFactory.create(createdAt.getTime())}`,
-      derivationIndex,
-      ...(withinTransaction !== undefined && { withinTransaction }),
-    });
+    try {
+      await this.dependencies.paymentRepository.create({
+        payment,
+        address,
+        addressIdentifier: `adr_${this.dependencies.ulidFactory.create(createdAt.getTime())}`,
+        derivationIndex,
+        ...(withinTransaction !== undefined && { withinTransaction }),
+      });
+    } catch (error) {
+      // One external reference identifies one payment for a merchant in an environment. Letting the
+      // constraint escape as a driver error answered 500 and told the caller nothing about what to
+      // change; the rule itself is worth keeping, because it is what stops a retried order becoming
+      // two payments for the same goods.
+      if (error instanceof DuplicateMerchantReferenceError) {
+        return failed({
+          reason: 'duplicate_external_reference',
+          detail:
+            'A payment already exists for this external reference. Use the existing payment, or a different reference.',
+        });
+      }
+      throw error;
+    }
 
     return { kind: 'created', payment };
   }

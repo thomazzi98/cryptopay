@@ -1,3 +1,5 @@
+import type { FastifyReply, FastifyRequest } from 'fastify';
+
 import type { BlockCursorRepository } from '../../infrastructure/persistence/block-cursor.repository.js';
 import type { ApplicationServer } from '../server-types.js';
 
@@ -85,15 +87,23 @@ async function reportNetworks(
   });
 }
 
+function reportLiveness(request: FastifyRequest, reply: FastifyReply): void {
+  void reply.code(200).send({ status: 'ok' });
+}
+
 export function registerHealthRoutes(
   server: ApplicationServer,
   dependencies: ReadinessDependencies,
 ): void {
-  server.get('/healthz', (request, reply) => {
-    void reply.code(200).send({ status: 'ok' });
-  });
+  /**
+   * Two names for each check. `/healthz` and `/readyz` are what the container orchestrator was
+   * already configured against; `/health` and `/readiness` are the names the integration contract
+   * documents. One handler serves both, so the two can never answer differently.
+   */
+  server.get('/healthz', reportLiveness);
+  server.get('/health', reportLiveness);
 
-  server.get('/readyz', async (request, reply) => {
+  const reportReadiness = async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
     const components: ComponentReport[] = [
       {
         name: 'configuration',
@@ -121,5 +131,8 @@ export function registerHealthRoutes(
       uptimeSeconds: Math.floor((Date.now() - dependencies.startedAtMilliseconds) / 1000),
       components,
     });
-  });
+  };
+
+  server.get('/readyz', reportReadiness);
+  server.get('/readiness', reportReadiness);
 }

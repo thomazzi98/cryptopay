@@ -162,6 +162,34 @@ export interface CreatePaymentRecord {
   readonly withinTransaction?: (client: PoolClient) => Promise<void>;
 }
 
+/**
+ * A merchant reference already used by another payment of the same merchant in the same environment.
+ *
+ * Raised as a type rather than allowed to escape as a driver error, because the alternative is a
+ * 500 that tells an integrator nothing and puts a constraint name in a log they cannot act on. One
+ * external reference identifies one payment, which is what makes a retry with a fresh idempotency
+ * key safe rather than a way to charge twice for the same order.
+ */
+export class DuplicateMerchantReferenceError extends Error {
+  constructor() {
+    super('A payment already exists for this merchant reference');
+    this.name = 'DuplicateMerchantReferenceError';
+  }
+}
+
+const UNIQUE_VIOLATION = '23505';
+const MERCHANT_REFERENCE_CONSTRAINT = 'payments_merchant_reference_unique';
+
+function isDuplicateMerchantReference(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) {
+    return false;
+  }
+  const candidate = error as { code?: unknown; constraint?: unknown };
+  return (
+    candidate.code === UNIQUE_VIOLATION && candidate.constraint === MERCHANT_REFERENCE_CONSTRAINT
+  );
+}
+
 export class PaymentRepository {
   private readonly pool: Pool;
 
@@ -239,6 +267,9 @@ export class PaymentRepository {
       await client.query('COMMIT');
     } catch (error) {
       await client.query('ROLLBACK');
+      if (isDuplicateMerchantReference(error)) {
+        throw new DuplicateMerchantReferenceError();
+      }
       throw error;
     } finally {
       client.release();
