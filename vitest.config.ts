@@ -42,6 +42,18 @@ export default defineConfig({
       },
       {
         test: {
+          // Reads a public test network over the internet, so it is excluded from `npm test` and
+          // from `npm run test:integration`, and is run on demand. Nothing here spends anything:
+          // every assertion is a read, and the transfers it checks already exist on the chain.
+          name: 'tron-live',
+          root: './apps/api',
+          include: ['live/tron/**/*.spec.ts'],
+          testTimeout: 60_000,
+          hookTimeout: 60_000,
+        },
+      },
+      {
+        test: {
           name: 'tools',
           include: ['tools/**/*.spec.mjs'],
           // Each assertion boots ESLint against the real flat config and resolves every plugin.

@@ -70,6 +70,17 @@ export interface TronChainGatewayOptions {
   readonly expectedLedgerIdentity: string;
 }
 
+/**
+ * TRON reports its genesis identity as bare hex; this repository writes every hash with an 0x
+ * prefix, partly by convention and partly because a bare sixty-four character hex constant is
+ * indistinguishable from a private key to any scanner. Both sides are normalised so the comparison
+ * is about the chain rather than about how the value was spelled.
+ */
+function normaliseIdentity(identity: string): string {
+  const lowercase = identity.toLowerCase();
+  return lowercase.startsWith('0x') ? lowercase.slice(2) : lowercase;
+}
+
 function toPosition(header: TronBlockHeader): LedgerPosition {
   return { height: BigInt(header.number), reference: header.blockId };
 }
@@ -120,11 +131,11 @@ export class TronChainGateway implements ChainGateway {
   constructor(options: TronChainGatewayOptions) {
     this.networkIdentifier = options.networkIdentifier;
     this.node = options.node;
-    this.expectedLedgerIdentity = options.expectedLedgerIdentity.toLowerCase();
+    this.expectedLedgerIdentity = normaliseIdentity(options.expectedLedgerIdentity);
   }
 
   async assertLedgerIdentity(): Promise<void> {
-    const observed = await this.node.readGenesisIdentity();
+    const observed = normaliseIdentity(await this.node.readGenesisIdentity());
     if (observed !== this.expectedLedgerIdentity) {
       throw new LedgerIdentityMismatchError(this.expectedLedgerIdentity, observed);
     }

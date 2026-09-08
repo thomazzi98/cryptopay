@@ -34,6 +34,7 @@
     "docs:generate": "node scripts/verify-docs.mjs --write",
     "docs:check": "node scripts/verify-docs.mjs",
     "test:integration": "vitest run --project api-integration",
+    "test:tron": "vitest run --project tron-live",
     "test:all": "vitest run",
     "scan:secrets": "node scripts/scan-secrets.mjs",
     "check:testnet-key": "node scripts/check-testnet-key.mjs",
