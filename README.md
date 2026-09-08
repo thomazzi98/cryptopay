@@ -110,12 +110,18 @@ packages/shared/   pure, dependency-light code shared by the API, the web app an
 apps/api/          the API and both workers: the chain scanner and the callback deliverer.
 apps/web/          the Next.js dashboard and the public checkout page.
 apps/demo-receiver/ a merchant endpoint that verifies with the same module the API signs with.
-docs/              limitations, webhooks, the state machine, and the decision records.
+docs/              integration, extension, limitations, webhooks, the state machine, and the
+                   decision records.
 scripts/           preflight, the demo runner, the secret scanner and the testnet key check.
 ```
 
 ## Documentation
 
+- [docs/integration.md](docs/integration.md) — how another system integrates: authentication,
+  idempotency, discovery, amounts, errors, and what to do if you are a payment gateway putting this
+  behind your own checkout.
+- [docs/extending.md](docs/extending.md) — the actual file list for adding an asset, a network, or a
+  chain family, and where the second-chain claim is not yet proven.
 - [docs/limitations.md](docs/limitations.md) — every real exposure and gap, unhedged.
 - [docs/webhooks.md](docs/webhooks.md) — the callback contract, and the three rules implementations
   get wrong.
