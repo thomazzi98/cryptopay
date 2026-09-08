@@ -1,7 +1,7 @@
-import { binarize, Decoder, Detector, grayscale } from '@nuintun/qrcode';
 import { PNG } from 'pngjs';
 import { describe, expect, it } from 'vitest';
 
+import { decodeQrCode as decode } from './qr-decoder.test-helper.js';
 import { renderPaymentQrCode } from './qr-code.js';
 
 /**
@@ -14,28 +14,6 @@ import { renderPaymentQrCode } from './qr-code.js';
  * from the outside: a chunk allocated four bytes too long, which appended trailing content after
  * IEND, and a greyscale sampling error that read the wrong byte of every pixel.
  */
-
-/** Decodes the emitted image the way a customer's phone would: pixels in, text out. */
-function decode(bytes: Uint8Array): string | null {
-  const image = PNG.sync.read(Buffer.from(bytes));
-  const data = new Uint8ClampedArray(image.width * image.height * 4);
-  for (let pixel = 0; pixel < image.width * image.height; pixel += 1) {
-    // pngjs normalises every image to RGBA regardless of the source colour type, so the stride is
-    // always four even though this PNG was written as single-channel greyscale.
-    const grey = image.data[pixel * 4] ?? 0;
-    data[pixel * 4] = grey;
-    data[pixel * 4 + 1] = grey;
-    data[pixel * 4 + 2] = grey;
-    data[pixel * 4 + 3] = 255;
-  }
-  const luminance = grayscale({ data, width: image.width, height: image.height });
-  const detected = new Detector().detect(binarize(luminance, image.width, image.height));
-  const located = detected.next();
-  if (located.done === true) {
-    return null;
-  }
-  return new Decoder().decode(located.value.matrix).content;
-}
 
 const POLYGON_TOKEN_URI =
   'ethereum:0x3c499c542cef5e3811e1192ce70d8cc03d5c3359@137/transfer?address=0x7b1a4e6c0f9d2a3b5c8e1f04a6d7b9c2e3f10a4d&uint256=25000000';

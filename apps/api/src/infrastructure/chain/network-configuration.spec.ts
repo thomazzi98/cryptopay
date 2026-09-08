@@ -10,6 +10,9 @@ import {
 } from '@cryptopay/shared';
 import { describe, expect, it } from 'vitest';
 
+import { renderPaymentQrCode } from '../qr/qr-code.js';
+import { decodeQrCode } from '../qr/qr-decoder.test-helper.js';
+import { buildPaymentUri } from './payment-uri.js';
 import {
   explorerAccountUrl,
   explorerTransactionUrl,
@@ -323,6 +326,34 @@ describe('what each network says it can do', () => {
     expect(claimsSettlementWithoutSigning).toBe(false);
   });
 
+  /**
+   * The strongest form of this assertion available: a network that claims it can produce a payment
+   * URI has one produced, drawn as a QR code, and scanned back out of the image. The claim is
+   * checked against behaviour rather than against another constant.
+   */
+  it.each(ALL_NETWORKS)('backs up the payment URI claim on %s by scanning one', (network) => {
+    const configuration = networkConfigurationFor(network);
+    const asset = configuration.assetAllowlist[0];
+    const uriIsClaimed = configuration.capabilities.supportsPaymentUri && asset !== undefined;
+    const decoded = uriIsClaimed
+      ? decodeQrCode(
+          renderPaymentQrCode(
+            buildPaymentUri({
+              networkFamily: configuration.networkFamily,
+              evmChainId: configuration.evmChainId,
+              destinationAccount: '0x7b1a4e6c0f9d2a3b5c8e1f04a6d7b9c2e3f10a4d',
+              assetReference: asset.reference,
+              assetDecimals: asset.decimals,
+              amountInBaseUnits: '25000000',
+              memo: null,
+            }),
+          ).bytes,
+        )
+      : null;
+    expect(decoded === null).toBe(!uriIsClaimed);
+    expect(decoded ?? '').toContain(uriIsClaimed ? asset.reference : '');
+  });
+
   it.each(CAPABILITY_NAMES)('declares %s explicitly on every network', (flag) => {
     for (const network of ALL_NETWORKS) {
       expect(typeof networkConfigurationFor(network).capabilities[flag]).toBe('boolean');
@@ -339,7 +370,6 @@ describe('what each network says it can do', () => {
     for (const network of ALL_NETWORKS) {
       const { capabilities } = networkConfigurationFor(network);
       expect(capabilities.supportsNativePayments).toBe(false);
-      expect(capabilities.supportsPaymentUri).toBe(false);
       expect(capabilities.supportsMemo).toBe(false);
     }
   });

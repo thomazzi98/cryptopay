@@ -101,8 +101,7 @@ export const NETWORK_CONFIGURATIONS: Readonly<Record<NetworkIdentifier, NetworkC
         // flag true before then would be the exact "fake an unsupported capability" the brief bans.
         supportsNativePayments: false,
         supportsTokenPayments: true,
-        // Flipped on with the EIP-681 builder.
-        supportsPaymentUri: false,
+        supportsPaymentUri: true,
         supportsEventMonitoring: true,
         supportsFinalityTracking: true,
         supportsMemo: false,
@@ -138,8 +137,7 @@ export const NETWORK_CONFIGURATIONS: Readonly<Record<NetworkIdentifier, NetworkC
         // flag true before then would be the exact "fake an unsupported capability" the brief bans.
         supportsNativePayments: false,
         supportsTokenPayments: true,
-        // Flipped on with the EIP-681 builder.
-        supportsPaymentUri: false,
+        supportsPaymentUri: true,
         supportsEventMonitoring: true,
         supportsFinalityTracking: true,
         supportsMemo: false,
@@ -171,7 +169,7 @@ export const NETWORK_CONFIGURATIONS: Readonly<Record<NetworkIdentifier, NetworkC
       capabilities: Object.freeze({
         supportsNativePayments: false,
         supportsTokenPayments: true,
-        supportsPaymentUri: false,
+        supportsPaymentUri: true,
         supportsEventMonitoring: true,
         // A development chain publishes no finality tag, so there is nothing to track.
         supportsFinalityTracking: false,
