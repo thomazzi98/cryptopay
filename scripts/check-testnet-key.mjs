@@ -30,7 +30,31 @@ const MAINNET_ENDPOINTS = Object.freeze([
 const ENVIRONMENT_FILE = '.env';
 const KEY_VARIABLE = 'AMOY_TESTNET_PRIVATE_KEY';
 
+/** Below this the answer is "unknown", and unknown must never be reported as "clean". */
+const MINIMUM_REACHABLE_ENDPOINTS = 3;
+
+function normalise(raw) {
+  const trimmed = raw.trim().replaceAll(/^["']|["']$/g, '');
+  if (trimmed === '') {
+    return null;
+  }
+  return trimmed.startsWith('0x') ? trimmed : `0x${trimmed}`;
+}
+
+/**
+ * The environment first, then the file.
+ *
+ * CI has no `.env`. It hands the key to this process as an environment variable, which is precisely
+ * the case this check exists for, and reading only the file meant the workflow step that refuses a
+ * mainnet-funded key printed "nothing to check" and exited zero on every run. The gate had never
+ * once been applied to the key it was guarding.
+ */
 function readConfiguredKey() {
+  const fromEnvironment = process.env[KEY_VARIABLE];
+  if (fromEnvironment !== undefined) {
+    return normalise(fromEnvironment);
+  }
+
   let contents;
   try {
     contents = readFileSync(ENVIRONMENT_FILE, 'utf8');
@@ -42,14 +66,7 @@ function readConfiguredKey() {
   if (line === undefined) {
     return null;
   }
-  const raw = line
-    .slice(KEY_VARIABLE.length + 1)
-    .trim()
-    .replaceAll(/^["']|["']$/g, '');
-  if (raw === '') {
-    return null;
-  }
-  return raw.startsWith('0x') ? raw : `0x${raw}`;
+  return normalise(line.slice(KEY_VARIABLE.length + 1));
 }
 
 async function inspect(endpoint, address) {
@@ -76,9 +93,18 @@ async function inspect(endpoint, address) {
 }
 
 async function main() {
+  // A caller that depends on this check having run passes --required, so a missing key fails rather
+  // than passing quietly. That is the difference between a gate and a decoration.
+  const required = process.argv.includes('--required');
   const key = readConfiguredKey();
   if (key === null) {
-    console.log(`No ${KEY_VARIABLE} is configured in ${ENVIRONMENT_FILE}. Nothing to check.`);
+    const where = `${KEY_VARIABLE} (environment, or ${ENVIRONMENT_FILE})`;
+    if (required) {
+      console.error(`No ${where} is set, and --required was given. Refusing to continue.`);
+      process.exitCode = 1;
+      return;
+    }
+    console.log(`No ${where} is configured. Nothing to check.`);
     return;
   }
 
@@ -114,8 +140,24 @@ async function main() {
     }
   }
 
+  // Failing closed. An endpoint that did not answer is not evidence of a clean key, and a check
+  // that announces safety after asking nobody is worse than no check at all, because it is believed.
+  const reachable = reports.filter((report) => report.reachable);
+  if (reachable.length < MINIMUM_REACHABLE_ENDPOINTS) {
+    console.error(
+      `\nOnly ${reachable.length.toString()} of ${reports.length.toString()} chains answered, and ${MINIMUM_REACHABLE_ENDPOINTS.toString()} are required.`,
+    );
+    console.error(
+      'This key has not been cleared. Run this again when the endpoints are reachable.',
+    );
+    process.exitCode = 1;
+    return;
+  }
+
   if (used.length === 0) {
-    console.log('\nThis key has no mainnet balance and no mainnet history. Safe to use for tests.');
+    console.log(
+      `\nChecked ${reachable.length.toString()} chains. This key has no mainnet balance and no mainnet history.`,
+    );
     return;
   }
 

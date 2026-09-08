@@ -44,7 +44,7 @@ jobs:
       - name: Refuse a key that is active on any mainnet
         env:
           AMOY_TESTNET_PRIVATE_KEY: ${{ secrets.AMOY_TESTNET_PRIVATE_KEY }}
-        run: node scripts/check-testnet-key.mjs
+        run: node scripts/check-testnet-key.mjs --required
 
       # One startup path, shared with `npm run demo`, so the thing being validated is the thing that
       # runs locally. The key is handed to the validation in memory and never written anywhere.
