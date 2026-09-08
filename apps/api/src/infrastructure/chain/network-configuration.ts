@@ -111,9 +111,7 @@ export const NETWORK_CONFIGURATIONS: Readonly<Record<NetworkIdentifier, NetworkC
       addressForm: 'evm-lowercase-hex',
       referenceForm: 'evm-hash',
       capabilities: Object.freeze({
-        // Native POL payments are watched only once the block-body scan path lands; declaring the
-        // flag true before then would be the exact "fake an unsupported capability" the brief bans.
-        supportsNativePayments: false,
+        supportsNativePayments: true,
         supportsTokenPayments: true,
         supportsPaymentUri: true,
         supportsEventMonitoring: true,
@@ -147,9 +145,7 @@ export const NETWORK_CONFIGURATIONS: Readonly<Record<NetworkIdentifier, NetworkC
       addressForm: 'evm-lowercase-hex',
       referenceForm: 'evm-hash',
       capabilities: Object.freeze({
-        // Native POL payments are watched only once the block-body scan path lands; declaring the
-        // flag true before then would be the exact "fake an unsupported capability" the brief bans.
-        supportsNativePayments: false,
+        supportsNativePayments: true,
         supportsTokenPayments: true,
         supportsPaymentUri: true,
         supportsEventMonitoring: true,
@@ -181,7 +177,7 @@ export const NETWORK_CONFIGURATIONS: Readonly<Record<NetworkIdentifier, NetworkC
       addressForm: 'evm-lowercase-hex',
       referenceForm: 'evm-hash',
       capabilities: Object.freeze({
-        supportsNativePayments: false,
+        supportsNativePayments: true,
         supportsTokenPayments: true,
         supportsPaymentUri: true,
         supportsEventMonitoring: true,

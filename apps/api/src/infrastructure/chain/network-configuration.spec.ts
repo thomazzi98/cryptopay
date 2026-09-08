@@ -384,11 +384,9 @@ describe('what each network says it can do', () => {
   it('claims no capability whose implementation has not landed', () => {
     for (const network of ALL_NETWORKS) {
       const configuration = networkConfigurationFor(network);
-      // TRON reads native TransferContract entries out of the block body and Solana reads lamport
-      // deltas, so both claim native payments and both adapter suites drive those paths. The EVM
-      // adapter does not read block bodies yet, so Polygon does not claim it.
-      const nativeIsImplemented = configuration.networkFamily !== 'polygon';
-      expect(configuration.capabilities.supportsNativePayments).toBe(nativeIsImplemented);
+      // Every family now reads native currency: TRON from TransferContract entries, Solana from
+      // lamport deltas, and Polygon from block bodies, since a plain value transfer emits no log.
+      expect(configuration.capabilities.supportsNativePayments).toBe(true);
 
       // Solana Pay carries a reference field, which is the only place across the three families
       // where a memo has somewhere real to go. The URI builder refuses one on the other two.

@@ -1,6 +1,7 @@
 import type { LedgerHeader, NetworkIdentifier } from '@cryptopay/shared';
 
 import { classifyTransfer } from '../domain/transfer-ledger.js';
+import { NATIVE_ASSET_REFERENCE } from '../infrastructure/chain/token-registry.js';
 import { networkConfigurationFor } from '../infrastructure/chain/network-configuration.js';
 import type { BlockCursor } from '../infrastructure/persistence/block-cursor.repository.js';
 import type { BlockCursorRepository } from '../infrastructure/persistence/block-cursor.repository.js';
@@ -160,12 +161,19 @@ export class ScanNetworkUseCase {
       this.network,
       this.policy.terminalGraceSeconds,
     );
+    // Asked every tick rather than assumed from configuration, so a deployment that accepts native
+    // currency but has nobody waiting for it pays nothing for the capability.
+    const nativeIsAwaited = await this.dependencies.paymentRepository.hasLiveNativePayment(
+      this.network,
+      this.policy.terminalGraceSeconds,
+    );
 
     const attempt = await this.scanAdaptively(
       cursor,
       fromHeight,
       progress.tip.height,
       watchedAccounts,
+      nativeIsAwaited,
     );
     const incoherent = this.findIncoherentTransfer(attempt.result);
     if (incoherent !== null) {
@@ -299,9 +307,15 @@ export class ScanNetworkUseCase {
     fromHeight: bigint,
     tipHeight: bigint,
     watchedAccounts: readonly string[],
+    nativeIsAwaited: boolean,
   ): Promise<{ result: TransferScanResult; nextScanRange: number; shrank: boolean }> {
     const configuration = networkConfigurationFor(this.network);
-    const assetReferences = configuration.assetAllowlist.map((asset) => asset.reference);
+    const tokenReferences = configuration.assetAllowlist.map((asset) => asset.reference);
+    // The sentinel is added rather than listed in the allowlist, because the allowlist is what a
+    // token must appear on to be credited and native currency has no contract to allow.
+    const assetReferences = nativeIsAwaited
+      ? [...tokenReferences, NATIVE_ASSET_REFERENCE]
+      : tokenReferences;
     let range = clamp(
       cursor.currentScanRange,
       this.policy.minimumScanRange,
@@ -398,9 +412,15 @@ export class ScanNetworkUseCase {
       accounts,
     );
     const byAccount = new Map(payments.map((payment) => [payment.receivingAccount, payment]));
-    const allowedAssetReferences = networkConfigurationFor(this.network).assetAllowlist.map(
-      (asset) => asset.reference,
-    );
+    const configuration = networkConfigurationFor(this.network);
+    // The allowlist names the tokens this network settles. Native currency is not on it and cannot
+    // be: it has no contract to allow. It is added here because a payment can only ask for it if the
+    // registry resolved a native entry for this network, and without it every native transfer is
+    // classified as an asset the network does not settle.
+    const allowedAssetReferences = [
+      ...configuration.assetAllowlist.map((asset) => asset.reference),
+      ...(configuration.capabilities.supportsNativePayments ? [NATIVE_ASSET_REFERENCE] : []),
+    ];
 
     const recordable: RecordableTransfer[] = [];
     for (const transfer of result.transfers) {

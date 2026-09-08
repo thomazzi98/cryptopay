@@ -392,6 +392,31 @@ export class PaymentRepository {
   }
 
   /**
+   * Whether any live payment on this network is waiting for the chain's own currency.
+   *
+   * Native currency emits no log, so detecting it means reading whole block bodies, which was
+   * measured at roughly two hundred kilobytes per block on Polygon. That is worth spending when
+   * somebody is waiting for a native payment and pure waste otherwise, so the scanner asks this
+   * before it asks for block bodies.
+   */
+  async hasLiveNativePayment(
+    network: NetworkIdentifier,
+    terminalGraceSeconds: number,
+  ): Promise<boolean> {
+    const result = await this.pool.query<{ exists: boolean }>(
+      `SELECT EXISTS (
+         SELECT 1 FROM payments
+          WHERE network_identifier = $1::network_identifier
+            AND asset_reference = 'native'
+            AND (status IN ('pending', 'partially_funded', 'confirming')
+                 OR updated_at > now() - make_interval(secs => $2))
+       ) AS exists`,
+      [network, terminalGraceSeconds],
+    );
+    return result.rows[0]?.exists ?? false;
+  }
+
+  /**
    * Resolves observed transfers back to the payments they were sent to. A payment address is unique
    * per network by constraint, so this mapping is one to one and cannot silently credit the wrong
    * payment.

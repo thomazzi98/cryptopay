@@ -168,6 +168,43 @@ async function insertForeignNetworkPayment(): Promise<string> {
   return id;
 }
 
+/** A payment that expects the chain's own currency rather than a token. */
+async function insertNativePayment(receivingAccount: string, requested: bigint): Promise<string> {
+  paymentCounter += 1;
+  const id = `pay_01K4QW6ZR2M8X4T7YQ0C3D9${paymentCounter.toString().padStart(3, '0')}`;
+  await pool.query(
+    `INSERT INTO payments (
+       id, merchant_id, environment, network_identifier, checkout_token,
+       asset_reference, asset_symbol, asset_decimals,
+       requested_amount, minimum_acceptable_amount, maximum_acceptable_amount,
+       receiving_account, status, required_confirmations, requires_finality_tag,
+       created_at_block_height, expires_at
+     ) VALUES ($1,$2,'test','local-anvil',$1,'native','ETH',18,$3,$3,$3,$4,'pending',$5,true,0,
+               $6::timestamptz + make_interval(mins => 30))`,
+    [
+      id,
+      MERCHANT_ID,
+      requested.toString(),
+      receivingAccount,
+      REQUIRED_CONFIRMATIONS,
+      currentTime.toISOString(),
+    ],
+  );
+  return id;
+}
+
+/** A plain value transfer: no contract, no log, nothing for a log filter to find. */
+async function sendNative(destination: string, amount: bigint): Promise<void> {
+  const wallet = createWalletClient({ account: customer, transport: http(rpcUrl) });
+  await wallet.sendTransaction({
+    to: destination as Address,
+    value: amount,
+    account: customer,
+    chain: null,
+  });
+  await mineBlock(rpcUrl);
+}
+
 async function placeCursorAtTip(): Promise<void> {
   const tip = await publicClient().getBlock({ blockTag: 'latest' });
   await pool.query(
@@ -542,5 +579,104 @@ describe('claiming work from the evaluation queue', () => {
 
     const foreignClaim = await queue.claim('worker-amoy', 'polygon-amoy', 10, 30);
     expect(foreignClaim).toEqual([foreignPaymentId]);
+  });
+});
+
+/**
+ * Native currency, which is a different detection problem rather than a different asset.
+ *
+ * An ERC-20 transfer emits a Transfer event that a log filter finds cheaply. A plain value transfer
+ * emits nothing at all, so the only way to see one is to read the block body and look at where the
+ * value went. These drive that path against a real chain.
+ */
+describe('a payment made in the chain own currency', () => {
+  it('detects a plain value transfer and completes the payment', async () => {
+    const account = anvilAccount(50).address.toLowerCase();
+    const paymentId = await insertNativePayment(account, 1_500_000_000_000_000_000n);
+    const evaluator = evaluatorFor(gateway, 'worker-native');
+
+    await sendNative(account, 1_500_000_000_000_000_000n);
+    for (let mined = 0; mined < 7; mined += 1) {
+      await tick(evaluator);
+      await mineBlock(rpcUrl);
+    }
+
+    const row = await readPaymentRow(paymentId);
+    expect(row.status).toBe('completed');
+    expect(row.credited_amount).toBe('1500000000000000000');
+    expect(await transitionsFor(paymentId)).toEqual(['confirming', 'completed']);
+  });
+
+  it('credits a partial native payment without completing it', async () => {
+    const account = anvilAccount(51).address.toLowerCase();
+    const paymentId = await insertNativePayment(account, 2_000_000_000_000_000_000n);
+    const evaluator = evaluatorFor(gateway, 'worker-native');
+
+    await sendNative(account, 500_000_000_000_000_000n);
+    await tick(evaluator);
+
+    const row = await readPaymentRow(paymentId);
+    expect(row.status).toBe('partially_funded');
+    expect(row.credited_amount).toBe('500000000000000000');
+  });
+
+  it('does not credit value sent to a different address', async () => {
+    const account = anvilAccount(52).address.toLowerCase();
+    const paymentId = await insertNativePayment(account, 1_000_000_000_000_000_000n);
+    const evaluator = evaluatorFor(gateway, 'worker-native');
+
+    await sendNative(anvilAccount(53).address.toLowerCase(), 1_000_000_000_000_000_000n);
+    await tick(evaluator);
+
+    const row = await readPaymentRow(paymentId);
+    expect(row.status).toBe('pending');
+    expect(row.credited_amount).toBe('0');
+  });
+
+  /**
+   * A token payment must not be satisfied by native currency, nor the reverse. The asset reference
+   * is the identity, and the native sentinel is not an address any token has.
+   */
+  it('does not let native currency satisfy a payment expecting a token', async () => {
+    const account = anvilAccount(54).address.toLowerCase();
+    const paymentId = await insertPayment(account, { requested: 25_000_000n });
+    const evaluator = evaluatorFor(gateway, 'worker-native');
+
+    await sendNative(account, 5_000_000_000_000_000_000n);
+    await tick(evaluator);
+
+    const row = await readPaymentRow(paymentId);
+    expect(row.status).toBe('pending');
+    expect(row.credited_amount).toBe('0');
+  });
+
+  it('does not let a token satisfy a payment expecting native currency', async () => {
+    const account = anvilAccount(55).address.toLowerCase();
+    const paymentId = await insertNativePayment(account, 1_000_000_000_000_000_000n);
+    const evaluator = evaluatorFor(gateway, 'worker-native');
+
+    await payTo(account, 25_000_000n);
+    await tick(evaluator);
+
+    const row = await readPaymentRow(paymentId);
+    expect(row.status).toBe('pending');
+    expect(row.credited_amount).toBe('0');
+  });
+
+  it('sums two native transfers to the same destination', async () => {
+    const account = anvilAccount(56).address.toLowerCase();
+    const paymentId = await insertNativePayment(account, 2_000_000_000_000_000_000n);
+    const evaluator = evaluatorFor(gateway, 'worker-native');
+
+    await sendNative(account, 1_200_000_000_000_000_000n);
+    await sendNative(account, 800_000_000_000_000_000n);
+    for (let mined = 0; mined < 7; mined += 1) {
+      await tick(evaluator);
+      await mineBlock(rpcUrl);
+    }
+
+    const row = await readPaymentRow(paymentId);
+    expect(row.status).toBe('completed');
+    expect(row.credited_amount).toBe('2000000000000000000');
   });
 });
