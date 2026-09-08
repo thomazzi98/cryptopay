@@ -26,6 +26,14 @@ import { PUBLIC_PAYMENT_STATES } from './public-payment-state.js';
 const DECIMAL_AMOUNT_PATTERN = /^\d+(?:\.\d+)?$/;
 
 /**
+ * What an API key is permitted to do. Reading payments and creating them are different powers, and
+ * a key pasted into a reporting dashboard should not be able to take money.
+ */
+export const API_KEY_SCOPES = Object.freeze(['payments:read', 'payments:write'] as const);
+
+export type ApiKeyScope = (typeof API_KEY_SCOPES)[number];
+
+/**
  * A currency is a name this system publishes, never an address a caller invents. The pattern is
  * what makes that structural: a contract address cannot be spelled in it, so the "clients may not
  * name a token" rule is enforced at the edge of the system rather than deeper in.

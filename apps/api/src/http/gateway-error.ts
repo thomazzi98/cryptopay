@@ -18,6 +18,7 @@ const DEFAULT_CODES: Readonly<Record<ProblemCode, string>> = Object.freeze({
   validation_failed: 'VALIDATION_FAILED',
   malformed_request: 'MALFORMED_REQUEST',
   unauthorized: 'UNAUTHORIZED',
+  forbidden: 'INSUFFICIENT_SCOPE',
   resource_not_found: 'RESOURCE_NOT_FOUND',
   method_not_allowed: 'METHOD_NOT_ALLOWED',
   rate_limited: 'RATE_LIMITED',

@@ -1,4 +1,4 @@
-import type { Environment } from '@cryptopay/shared';
+import type { ApiKeyScope, Environment } from '@cryptopay/shared';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 
 import { apiKeySecretMatches, parseApiKey } from '../infrastructure/crypto/api-key.js';
@@ -20,6 +20,7 @@ export interface AuthenticatedMerchant {
   readonly merchantId: string;
   readonly environment: Environment;
   readonly apiKeyIdentifier: string;
+  readonly scopes: readonly string[];
 }
 
 /**
@@ -90,6 +91,7 @@ export function createAuthenticationHook(
         merchantId: record.merchantId,
         environment: record.environment,
         apiKeyIdentifier: record.id,
+        scopes: record.scopes,
       }),
     );
 
@@ -114,6 +116,29 @@ export function requireMerchant(request: FastifyRequest): AuthenticatedMerchant 
   const merchant = authenticatedMerchants.get(request);
   if (merchant === undefined) {
     throw new ApplicationError('unauthorized', UNAUTHORIZED_DETAIL);
+  }
+  return merchant;
+}
+
+/**
+ * Refuses a request whose key was not granted the power it is trying to use.
+ *
+ * Answered as 403 rather than 404, which is the opposite of how a payment belonging to another
+ * merchant is treated, and deliberately so. Hiding another merchant's payment behind a 404 denies
+ * an attacker the knowledge that an identifier is real. Here the caller already holds a valid key
+ * and is asking about their own account; telling them their key lacks a scope reveals nothing they
+ * could not learn by looking at it, and saying 404 instead would send an integrator hunting for a
+ * missing resource that exists.
+ */
+export function requireScope(request: FastifyRequest, scope: ApiKeyScope): AuthenticatedMerchant {
+  const merchant = requireMerchant(request);
+  if (!merchant.scopes.includes(scope)) {
+    throw new ApplicationError(
+      'forbidden',
+      `This API key does not have the ${scope} scope.`,
+      [],
+      'INSUFFICIENT_SCOPE',
+    );
   }
   return merchant;
 }

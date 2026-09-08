@@ -23,6 +23,9 @@ export const PROBLEM_CATALOG = Object.freeze({
   validation_failed: { status: 422, title: 'Request validation failed' },
   malformed_request: { status: 400, title: 'Malformed request' },
   unauthorized: { status: 401, title: 'Missing or invalid API key' },
+  // Distinct from unauthorized: the key is valid and the caller is who they say they are, they
+  // simply were not granted this power.
+  forbidden: { status: 403, title: 'The API key lacks the required scope' },
   resource_not_found: { status: 404, title: 'Resource not found' },
   method_not_allowed: { status: 405, title: 'Method not allowed' },
   rate_limited: { status: 429, title: 'Too many requests' },

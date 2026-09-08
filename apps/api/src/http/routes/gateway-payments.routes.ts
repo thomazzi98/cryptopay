@@ -15,7 +15,7 @@ import type { MerchantRepository } from '../../infrastructure/persistence/mercha
 import type { PaymentRepository } from '../../infrastructure/persistence/payment.repository.js';
 import type { PaymentTransferRepository } from '../../infrastructure/persistence/payment-transfer.repository.js';
 import { MissingWalletSeedError } from '../../infrastructure/wallet/allocator-provider.js';
-import { requireMerchant, type AuthenticationHook } from '../authentication.js';
+import { requireScope, type AuthenticationHook } from '../authentication.js';
 import { GATEWAY_CODES, gatewayError } from '../gateway-error.js';
 import {
   presentGatewayPayment,
@@ -123,7 +123,7 @@ export function registerGatewayPaymentRoutes(
    * the identifier is real, which is all an enumeration attack needs.
    */
   async function requireOwnedPayment(request: FastifyRequest, paymentId: string): Promise<Payment> {
-    const authenticated = requireMerchant(request);
+    const authenticated = requireScope(request, 'payments:read');
     const payment = await dependencies.paymentRepository.findById(
       authenticated.merchantId,
       authenticated.environment,
@@ -147,7 +147,7 @@ export function registerGatewayPaymentRoutes(
     GATEWAY_PAYMENTS_PATH,
     { preHandler: dependencies.authenticate },
     async (request, reply) => {
-      const authenticated = requireMerchant(request);
+      const authenticated = requireScope(request, 'payments:write');
       const idempotencyKey = readIdempotencyKey(request.headers['idempotency-key']);
 
       const parsed = CreateGatewayPaymentRequestSchema.safeParse(request.body);
@@ -338,7 +338,7 @@ export function registerGatewayPaymentRoutes(
     `${GATEWAY_PAYMENTS_PATH}/:paymentId/cancel`,
     { preHandler: dependencies.authenticate },
     async (request, reply) => {
-      const authenticated = requireMerchant(request);
+      const authenticated = requireScope(request, 'payments:write');
       const { paymentId } = request.params as { paymentId: string };
       const outcome = await dependencies.paymentCanceler.execute(
         authenticated.merchantId,

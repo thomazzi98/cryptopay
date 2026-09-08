@@ -21,6 +21,7 @@ export interface ApiKeyRecord {
   readonly environment: Environment;
   readonly secretDigest: Buffer;
   readonly revokedAt: Date | null;
+  readonly scopes: readonly string[];
 }
 
 interface MerchantRow {
@@ -37,6 +38,7 @@ interface ApiKeyRow {
   readonly environment: Environment;
   readonly secret_digest: Buffer;
   readonly revoked_at: Date | null;
+  readonly scopes: string[];
 }
 
 export class MerchantRepository {
@@ -48,7 +50,7 @@ export class MerchantRepository {
 
   async findApiKey(keyIdentifier: string): Promise<ApiKeyRecord | null> {
     const result = await this.pool.query<ApiKeyRow>(
-      `SELECT id, merchant_id, environment, secret_digest, revoked_at
+      `SELECT id, merchant_id, environment, secret_digest, revoked_at, scopes
          FROM api_keys WHERE id = $1`,
       [keyIdentifier],
     );
@@ -63,6 +65,7 @@ export class MerchantRepository {
       environment: row.environment,
       secretDigest: row.secret_digest,
       revokedAt: row.revoked_at,
+      scopes: Object.freeze([...row.scopes]),
     });
   }
 

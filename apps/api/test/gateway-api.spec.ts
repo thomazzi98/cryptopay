@@ -35,18 +35,31 @@ let server: ApplicationServer;
 let testKey = '';
 let liveKey = '';
 let otherMerchantKey = '';
+let readOnlyKey = '';
+let writeOnlyKey = '';
 
 const ulidFactory = new UlidFactory();
 let keyCounter = 1_757_183_400_000;
 let idempotencyCounter = 0;
 
-async function issueKey(merchantId: string, environment: Environment): Promise<string> {
+async function issueKey(
+  merchantId: string,
+  environment: Environment,
+  scopes: readonly string[] = ['payments:read', 'payments:write'],
+): Promise<string> {
   keyCounter += 1;
   const generated = generateApiKey(environment, PEPPER, ulidFactory, keyCounter);
   await pool.query(
-    `INSERT INTO api_keys (id, merchant_id, environment, secret_digest, last_four, label)
-     VALUES ($1, $2, $3::environment_name, $4, $5, 'gateway')`,
-    [generated.keyIdentifier, merchantId, environment, generated.secretDigest, generated.lastFour],
+    `INSERT INTO api_keys (id, merchant_id, environment, secret_digest, last_four, label, scopes)
+     VALUES ($1, $2, $3::environment_name, $4, $5, 'gateway', $6::text[])`,
+    [
+      generated.keyIdentifier,
+      merchantId,
+      environment,
+      generated.secretDigest,
+      generated.lastFour,
+      [...scopes],
+    ],
   );
   return generated.presentedKey;
 }
@@ -141,6 +154,8 @@ beforeAll(async () => {
   testKey = await issueKey(MERCHANT_ID, 'test');
   liveKey = await issueKey(MERCHANT_ID, 'live');
   otherMerchantKey = await issueKey(OTHER_MERCHANT_ID, 'test');
+  readOnlyKey = await issueKey(MERCHANT_ID, 'test', ['payments:read']);
+  writeOnlyKey = await issueKey(MERCHANT_ID, 'test', ['payments:write']);
 });
 
 afterAll(async () => {
@@ -551,5 +566,67 @@ describe('the error contract', () => {
     const response = await get('/v1/payments/pay_01K4QW6ZR2M8X4T7YQ0C3F9999');
     expect(response.statusCode).toBe(404);
     expect(response.headers['content-type']).toContain('problem+json');
+  });
+});
+
+/**
+ * A key that can read payments and a key that can create them are different powers, and only one of
+ * them moves money. These assert the difference is enforced rather than documented.
+ */
+describe('what an API key is allowed to do', () => {
+  it('refuses payment creation to a key that can only read', async () => {
+    const response = await createPayment({ key: readOnlyKey });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.json<GatewayError>().error.code).toBe('INSUFFICIENT_SCOPE');
+    // The message says which scope is missing, because an integrator cannot fix what they cannot see.
+    expect(response.json<GatewayError>().error.message).toContain('payments:write');
+  });
+
+  it('lets a read-only key read a payment', async () => {
+    const created = await createPayment();
+    const read = await get(`/api/v1/payments/${created.json<GatewayPayment>().id}`, readOnlyKey);
+    expect(read.statusCode).toBe(200);
+  });
+
+  it('refuses reading to a key that can only write', async () => {
+    const created = await createPayment({ key: writeOnlyKey });
+    expect(created.statusCode).toBe(201);
+
+    const read = await get(`/api/v1/payments/${created.json<GatewayPayment>().id}`, writeOnlyKey);
+    expect(read.statusCode).toBe(403);
+  });
+
+  it('refuses cancellation to a key that can only read', async () => {
+    const created = await createPayment();
+    const response = await server.inject({
+      method: 'POST',
+      url: `/api/v1/payments/${created.json<GatewayPayment>().id}/cancel`,
+      headers: { authorization: `Bearer ${readOnlyKey}` },
+    });
+    expect(response.statusCode).toBe(403);
+  });
+
+  /**
+   * A missing scope is 403 rather than the 404 another merchant's payment gets. The caller already
+   * holds a valid key and is asking about their own account, so naming the reason reveals nothing
+   * and saves them hunting for a resource that exists.
+   */
+  it('distinguishes a missing scope from a payment that is not theirs', async () => {
+    const created = await createPayment();
+    const identifier = created.json<GatewayPayment>().id;
+
+    const wrongScope = await get(`/api/v1/payments/${identifier}`, writeOnlyKey);
+    const wrongMerchant = await get(`/api/v1/payments/${identifier}`, otherMerchantKey);
+
+    expect(wrongScope.statusCode).toBe(403);
+    expect(wrongMerchant.statusCode).toBe(404);
+  });
+
+  it('keeps existing keys able to do everything they could before', async () => {
+    const stored = await pool.query<{ scopes: string[] }>(
+      `SELECT scopes FROM api_keys WHERE label = 'gateway' LIMIT 1`,
+    );
+    expect(stored.rows[0]?.scopes).toContain('payments:read');
   });
 });
