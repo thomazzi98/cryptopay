@@ -2,6 +2,8 @@ import {
   isCanonicalAccount,
   USDC_POLYGON_AMOY_ADDRESS,
   USDC_POLYGON_MAINNET_ADDRESS,
+  USDC_SOLANA_DEVNET_MINT,
+  USDC_SOLANA_MAINNET_MINT,
   USDT_TRON_MAINNET_ADDRESS,
   USDT_TRON_NILE_ADDRESS,
   type AddressForm,
@@ -107,6 +109,36 @@ export const TOKEN_REGISTRY: Readonly<Record<NetworkIdentifier, readonly Registe
       Object.freeze({
         currency: 'USDT',
         reference: USDT_TRON_NILE_ADDRESS,
+        decimals: 6,
+        kind: 'token' as const,
+      }),
+    ]),
+
+    'solana-mainnet': Object.freeze([
+      Object.freeze({
+        currency: 'SOL',
+        reference: NATIVE_ASSET_REFERENCE,
+        decimals: 9,
+        kind: 'native' as const,
+      }),
+      Object.freeze({
+        currency: 'USDC',
+        reference: USDC_SOLANA_MAINNET_MINT,
+        decimals: 6,
+        kind: 'token' as const,
+      }),
+    ]),
+
+    'solana-devnet': Object.freeze([
+      Object.freeze({
+        currency: 'SOL',
+        reference: NATIVE_ASSET_REFERENCE,
+        decimals: 9,
+        kind: 'native' as const,
+      }),
+      Object.freeze({
+        currency: 'USDC',
+        reference: USDC_SOLANA_DEVNET_MINT,
         decimals: 6,
         kind: 'token' as const,
       }),

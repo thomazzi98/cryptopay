@@ -62,6 +62,21 @@ export const USDT_TRON_NILE_ADDRESS = 'TXLAQ63Xg1NAzckPwKHvzw7CSEmLMEqcdj';
 export const TRON_MAINNET_EXPLORER_BASE_URL = 'https://tronscan.org/#';
 export const TRON_NILE_EXPLORER_BASE_URL = 'https://nile.tronscan.org/#';
 
+/** Solana names a chain by its genesis hash, read from each network on 8 September 2026. */
+export const SOLANA_MAINNET_GENESIS_IDENTITY = '5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d';
+export const SOLANA_DEVNET_GENESIS_IDENTITY = 'EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG';
+
+export const SOLANA_NATIVE_CURRENCY_SYMBOL = 'SOL';
+/** One SOL is a billion lamports. */
+export const SOLANA_NATIVE_CURRENCY_DECIMALS = 9;
+
+/** Circle USDC, verified on chain: both mints are owned by the original SPL Token program. */
+export const USDC_SOLANA_MAINNET_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
+export const USDC_SOLANA_DEVNET_MINT = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
+
+export const SOLANA_MAINNET_EXPLORER_BASE_URL = 'https://explorer.solana.com';
+export const SOLANA_DEVNET_EXPLORER_BASE_URL = 'https://explorer.solana.com';
+
 export const POLYGON_MAINNET_EXPLORER_BASE_URL = 'https://polygonscan.com';
 export const POLYGON_AMOY_EXPLORER_BASE_URL = 'https://amoy.polygonscan.com';
 

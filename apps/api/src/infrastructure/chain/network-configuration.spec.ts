@@ -61,7 +61,7 @@ describe('the network table', () => {
       live
         .map((entry) => entry.networkIdentifier)
         .toSorted((left, right) => left.localeCompare(right)),
-    ).toStrictEqual(['polygon-mainnet', 'tron-mainnet']);
+    ).toStrictEqual(['polygon-mainnet', 'solana-mainnet', 'tron-mainnet']);
   });
 
   it('places the remaining networks in the test environment', () => {
@@ -384,12 +384,16 @@ describe('what each network says it can do', () => {
   it('claims no capability whose implementation has not landed', () => {
     for (const network of ALL_NETWORKS) {
       const configuration = networkConfigurationFor(network);
-      // TRON reads native TransferContract entries out of the block body, so it claims native
-      // payments and the adapter tests drive that path. The EVM adapter does not read block bodies
-      // yet, so Polygon does not claim it.
-      const nativeIsImplemented = configuration.networkFamily === 'tron';
+      // TRON reads native TransferContract entries out of the block body and Solana reads lamport
+      // deltas, so both claim native payments and both adapter suites drive those paths. The EVM
+      // adapter does not read block bodies yet, so Polygon does not claim it.
+      const nativeIsImplemented = configuration.networkFamily !== 'polygon';
       expect(configuration.capabilities.supportsNativePayments).toBe(nativeIsImplemented);
-      expect(configuration.capabilities.supportsMemo).toBe(false);
+
+      // Solana Pay carries a reference field, which is the only place across the three families
+      // where a memo has somewhere real to go. The URI builder refuses one on the other two.
+      const memoIsExpressible = configuration.networkFamily === 'solana';
+      expect(configuration.capabilities.supportsMemo).toBe(memoIsExpressible);
     }
   });
 });

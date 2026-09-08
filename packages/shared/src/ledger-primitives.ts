@@ -8,7 +8,13 @@
  */
 
 export type NetworkIdentifier =
-  'polygon-mainnet' | 'polygon-amoy' | 'local-anvil' | 'tron-mainnet' | 'tron-nile';
+  | 'polygon-mainnet'
+  | 'polygon-amoy'
+  | 'local-anvil'
+  | 'tron-mainnet'
+  | 'tron-nile'
+  | 'solana-mainnet'
+  | 'solana-devnet';
 
 export type Environment = 'live' | 'test';
 
@@ -18,6 +24,8 @@ export const NETWORK_IDENTIFIERS: readonly NetworkIdentifier[] = Object.freeze([
   'local-anvil',
   'tron-mainnet',
   'tron-nile',
+  'solana-mainnet',
+  'solana-devnet',
 ]);
 
 export const ENVIRONMENTS: readonly Environment[] = Object.freeze(['live', 'test']);

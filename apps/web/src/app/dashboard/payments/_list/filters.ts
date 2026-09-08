@@ -27,6 +27,8 @@ const NETWORK_LABELS: Readonly<Record<NetworkIdentifier, string>> = Object.freez
   'local-anvil': 'Local Anvil',
   'tron-mainnet': 'TRON',
   'tron-nile': 'TRON Nile',
+  'solana-mainnet': 'Solana',
+  'solana-devnet': 'Solana Devnet',
 });
 
 export const SELECTABLE_NETWORKS: readonly NetworkIdentifier[] = NETWORK_IDENTIFIERS;

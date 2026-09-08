@@ -94,6 +94,8 @@ const ConfigurationSchema = z
     polygonAmoyRpcUrls: z.array(z.url()).max(8).default([]),
     tronMainnetRpcUrls: z.array(z.url()).max(8).default([]),
     tronNileRpcUrls: z.array(z.url()).max(8).default([]),
+    solanaMainnetRpcUrls: z.array(z.url()).max(8).default([]),
+    solanaDevnetRpcUrls: z.array(z.url()).max(8).default([]),
     localAnvilRpcUrls: z.array(z.url()).max(8).default([]),
 
     /**
@@ -250,6 +252,8 @@ export function loadConfiguration(source: EnvironmentSource): Configuration {
     polygonAmoyRpcUrls: parseCommaSeparated(source.POLYGON_AMOY_RPC_URLS),
     tronMainnetRpcUrls: parseCommaSeparated(source.TRON_MAINNET_RPC_URLS),
     tronNileRpcUrls: parseCommaSeparated(source.TRON_NILE_RPC_URLS),
+    solanaMainnetRpcUrls: parseCommaSeparated(source.SOLANA_MAINNET_RPC_URLS),
+    solanaDevnetRpcUrls: parseCommaSeparated(source.SOLANA_DEVNET_RPC_URLS),
     localAnvilRpcUrls: parseCommaSeparated(source.LOCAL_ANVIL_RPC_URLS),
     polygonMainnetWalletRpcUrl: optionalText(source.POLYGON_MAINNET_WALLET_RPC_URL),
     polygonAmoyWalletRpcUrl: optionalText(source.POLYGON_AMOY_WALLET_RPC_URL),
@@ -293,6 +297,8 @@ export function rpcUrlsFor(
     'local-anvil': configuration.localAnvilRpcUrls,
     'tron-mainnet': configuration.tronMainnetRpcUrls,
     'tron-nile': configuration.tronNileRpcUrls,
+    'solana-mainnet': configuration.solanaMainnetRpcUrls,
+    'solana-devnet': configuration.solanaDevnetRpcUrls,
   };
   return byNetwork[network];
 }
@@ -311,9 +317,11 @@ export function spendCeilingFor(
     'polygon-mainnet': configuration.polygonMainnetSpendCeiling,
     'polygon-amoy': configuration.polygonAmoySpendCeiling,
     'local-anvil': configuration.localAnvilSpendCeiling,
-    // Nothing signs on TRON, so there is no spend to bound.
+    // Nothing signs on TRON or Solana, so there is no spend to bound.
     'tron-mainnet': undefined,
     'tron-nile': undefined,
+    'solana-mainnet': undefined,
+    'solana-devnet': undefined,
   };
   const configured = byNetwork[network];
   if (configured === undefined) {
@@ -336,9 +344,12 @@ export function walletRpcUrlFor(
     'polygon-mainnet': configuration.polygonMainnetWalletRpcUrl,
     'polygon-amoy': configuration.polygonAmoyWalletRpcUrl,
     'local-anvil': configuration.localAnvilWalletRpcUrl,
-    // A TRON payment is made by scanning a QR code, not by a browser wallet reaching an endpoint.
+    // A TRON or Solana payment is made by scanning a QR code, not by a browser wallet reaching an
+    // endpoint this system published.
     'tron-mainnet': undefined,
     'tron-nile': undefined,
+    'solana-mainnet': undefined,
+    'solana-devnet': undefined,
   };
   return byNetwork[network] ?? null;
 }

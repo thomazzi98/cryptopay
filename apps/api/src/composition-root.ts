@@ -29,6 +29,8 @@ import {
 } from './infrastructure/chain/network-configuration.js';
 import { TOKEN_REGISTRY, validateTokenRegistry } from './infrastructure/chain/token-registry.js';
 import type { ChainGateway } from './application/ports/chain-gateway.port.js';
+import { SolanaChainGateway } from './infrastructure/chain/solana/solana-chain-gateway.js';
+import { HttpSolanaNode } from './infrastructure/chain/solana/solana-client.js';
 import { TronChainGateway } from './infrastructure/chain/tron/tron-chain-gateway.js';
 import { HttpTronNode } from './infrastructure/chain/tron/tron-client.js';
 import { BlockCursorRepository } from './infrastructure/persistence/block-cursor.repository.js';
@@ -245,6 +247,17 @@ export function composeCallbackWorker(
  */
 function gatewayFor(configuration: Configuration, network: NetworkConfiguration): ChainGateway {
   const rpcUrls = rpcUrlsFor(configuration, network.networkIdentifier);
+  if (network.networkFamily === 'solana') {
+    const endpoint = rpcUrls[0];
+    if (endpoint === undefined) {
+      throw new Error(`No endpoint is configured for ${network.networkIdentifier}`);
+    }
+    return new SolanaChainGateway({
+      networkIdentifier: network.networkIdentifier,
+      node: new HttpSolanaNode({ endpoint }),
+      expectedLedgerIdentity: network.ledgerIdentity,
+    });
+  }
   if (network.networkFamily === 'tron') {
     const endpoint = rpcUrls[0];
     if (endpoint === undefined) {

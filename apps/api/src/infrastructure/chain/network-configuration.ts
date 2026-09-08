@@ -1,5 +1,11 @@
 import { TOKEN_REGISTRY } from './token-registry.js';
 import {
+  SOLANA_DEVNET_EXPLORER_BASE_URL,
+  SOLANA_DEVNET_GENESIS_IDENTITY,
+  SOLANA_MAINNET_EXPLORER_BASE_URL,
+  SOLANA_MAINNET_GENESIS_IDENTITY,
+  SOLANA_NATIVE_CURRENCY_DECIMALS,
+  SOLANA_NATIVE_CURRENCY_SYMBOL,
   TRON_MAINNET_EXPLORER_BASE_URL,
   TRON_MAINNET_GENESIS_IDENTITY,
   TRON_NATIVE_CURRENCY_DECIMALS,
@@ -259,6 +265,70 @@ export const NETWORK_CONFIGURATIONS: Readonly<Record<NetworkIdentifier, NetworkC
       assetAllowlist: allowlistFrom('tron-nile'),
       assetDenylist: Object.freeze([]),
       explorerBaseUrl: TRON_NILE_EXPLORER_BASE_URL,
+    }),
+
+    'solana-mainnet': Object.freeze({
+      networkIdentifier: 'solana-mainnet',
+      networkFamily: 'solana',
+      ledgerIdentity: SOLANA_MAINNET_GENESIS_IDENTITY,
+      evmChainId: null,
+      addressForm: 'base58-exact',
+      referenceForm: 'base58-exact',
+      capabilities: Object.freeze({
+        supportsNativePayments: true,
+        supportsTokenPayments: true,
+        supportsPaymentUri: true,
+        supportsEventMonitoring: true,
+        supportsFinalityTracking: true,
+        // Solana Pay carries a reference field, which is the one place across the three families
+        // where a memo has somewhere real to go.
+        supportsMemo: true,
+        supportsSettlement: false,
+      }),
+      displayName: 'Solana',
+      environment: 'live',
+      nativeCurrency: {
+        symbol: SOLANA_NATIVE_CURRENCY_SYMBOL,
+        decimals: SOLANA_NATIVE_CURRENCY_DECIMALS,
+      },
+      // Scanning reads finalized blocks only, so a scanned slot is already final and no count is
+      // waited for on top of it.
+      requiredConfirmations: 1,
+      requiresFinalityTag: true,
+      maximumReorgDepth: 32,
+      assetAllowlist: allowlistFrom('solana-mainnet'),
+      assetDenylist: Object.freeze([]),
+      explorerBaseUrl: SOLANA_MAINNET_EXPLORER_BASE_URL,
+    }),
+
+    'solana-devnet': Object.freeze({
+      networkIdentifier: 'solana-devnet',
+      networkFamily: 'solana',
+      ledgerIdentity: SOLANA_DEVNET_GENESIS_IDENTITY,
+      evmChainId: null,
+      addressForm: 'base58-exact',
+      referenceForm: 'base58-exact',
+      capabilities: Object.freeze({
+        supportsNativePayments: true,
+        supportsTokenPayments: true,
+        supportsPaymentUri: true,
+        supportsEventMonitoring: true,
+        supportsFinalityTracking: true,
+        supportsMemo: true,
+        supportsSettlement: false,
+      }),
+      displayName: 'Solana Devnet',
+      environment: 'test',
+      nativeCurrency: {
+        symbol: SOLANA_NATIVE_CURRENCY_SYMBOL,
+        decimals: SOLANA_NATIVE_CURRENCY_DECIMALS,
+      },
+      requiredConfirmations: 1,
+      requiresFinalityTag: true,
+      maximumReorgDepth: 32,
+      assetAllowlist: allowlistFrom('solana-devnet'),
+      assetDenylist: Object.freeze([]),
+      explorerBaseUrl: SOLANA_DEVNET_EXPLORER_BASE_URL,
     }),
   });
 
