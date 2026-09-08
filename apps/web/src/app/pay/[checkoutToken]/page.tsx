@@ -38,12 +38,16 @@ export default async function CheckoutPage({
   }
 
   const checkout = result.checkout;
-  const paymentUri = buildTokenTransferUri({
-    tokenAddress: checkout.asset.reference,
-    chainIdentifier: checkout.chainIdentifier,
-    recipient: checkout.receivingAccount,
-    amountInBaseUnits: checkout.requestedAmount.baseUnits,
-  });
+  // EIP-681 names the chain by number, so the URI exists only where the network has one.
+  const paymentUri =
+    checkout.chainIdentifier === null
+      ? null
+      : buildTokenTransferUri({
+          tokenAddress: checkout.asset.reference,
+          chainIdentifier: checkout.chainIdentifier,
+          recipient: checkout.receivingAccount,
+          amountInBaseUnits: checkout.requestedAmount.baseUnits,
+        });
 
   return (
     <main className="mx-auto w-full max-w-lg px-4 py-6 sm:px-6 sm:py-10">
@@ -53,7 +57,18 @@ export default async function CheckoutPage({
       <CheckoutLive
         checkoutToken={checkoutToken}
         initialCheckout={checkout}
-        scanPanel={<ScanToPay checkout={checkout} paymentUri={paymentUri} />}
+        scanPanel={
+          paymentUri === null ? (
+            <Card className="w-full">
+              <ErrorState
+                title="This network has no wallet link"
+                detail="Copy the address and the exact amount from the payment details instead. A deep link needs a numeric chain identity, which this network does not have."
+              />
+            </Card>
+          ) : (
+            <ScanToPay checkout={checkout} paymentUri={paymentUri} />
+          )
+        }
       />
     </main>
   );

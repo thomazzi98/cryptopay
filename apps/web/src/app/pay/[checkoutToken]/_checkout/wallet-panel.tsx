@@ -204,15 +204,21 @@ export function WalletPanel({
   const account = connection.address;
   const isConnected = connection.status === 'connected';
   const isOnAmoy = checkout.network === 'polygon-amoy';
-  const chainIsConfigured = chains.some((candidate) => candidate.id === checkout.chainIdentifier);
+  /**
+   * A browser wallet connects to an EVM chain, so this panel needs a numeric chain id. Networks
+   * whose family has none are paid by scanning the QR code instead, and the caller renders that
+   * path rather than this one.
+   */
+  const evmChainId = checkout.chainIdentifier ?? undefined;
+  const chainIsConfigured = chains.some((candidate) => candidate.id === evmChainId);
   // The wallet's own chain, never the configuration's idea of it.
-  const chainMatches = connection.chainId === checkout.chainIdentifier;
+  const chainMatches = evmChainId !== undefined && connection.chainId === evmChainId;
 
   const decimalsRead = useReadContract({
     address: tokenAddress,
     abi: erc20Abi,
     functionName: 'decimals',
-    chainId: checkout.chainIdentifier,
+    chainId: evmChainId,
     query: { enabled: isConnected },
   });
 
@@ -221,18 +227,18 @@ export function WalletPanel({
     abi: erc20Abi,
     functionName: 'balanceOf',
     args: account === undefined ? undefined : [account],
-    chainId: checkout.chainIdentifier,
+    chainId: evmChainId,
     query: { enabled: account !== undefined, refetchInterval: 12_000 },
   });
 
   const gasBalanceRead = useBalance({
     address: account,
-    chainId: checkout.chainIdentifier,
+    chainId: evmChainId,
     query: { enabled: account !== undefined, refetchInterval: 12_000 },
   });
 
   const feesRead = useEstimateFeesPerGas({
-    chainId: checkout.chainIdentifier,
+    chainId: evmChainId,
     query: { enabled: account !== undefined },
   });
 
@@ -261,8 +267,8 @@ export function WalletPanel({
       label: `Your wallet is on ${checkout.networkDisplayName}`,
       state: stateOf(isConnected, chainMatches),
       detail: chainMatches
-        ? `Chain ${checkout.chainIdentifier}, the one this payment settles on.`
-        : `Your wallet reports chain ${connection.chainId ?? 'none'}. This payment settles on chain ${checkout.chainIdentifier}.`,
+        ? `Chain ${evmChainId}, the one this payment settles on.`
+        : `Your wallet reports chain ${connection.chainId ?? 'none'}. This payment settles on chain ${evmChainId ?? 'unknown'}.`,
       remedy:
         isConnected && !chainMatches && chainIsConfigured ? (
           <Button
@@ -270,7 +276,9 @@ export function WalletPanel({
             variant="secondary"
             loading={switchChain.isPending}
             onClick={() => {
-              switchChain.mutate({ chainId: checkout.chainIdentifier });
+              if (evmChainId !== undefined) {
+                switchChain.mutate({ chainId: evmChainId });
+              }
             }}
           >
             Switch network
@@ -361,7 +369,7 @@ export function WalletPanel({
         abi: erc20Abi,
         functionName: 'transfer',
         args: [recipient, outstandingBaseUnits],
-        chainId: checkout.chainIdentifier,
+        chainId: evmChainId,
       });
       setSentReference(reference);
       rememberBroadcast(broadcastMemoryKey, reference);

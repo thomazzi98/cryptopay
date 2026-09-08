@@ -136,7 +136,7 @@ export class EvmChainGateway implements ChainGateway {
   async assertLedgerIdentity(): Promise<void> {
     const observed = await this.client.getChainId();
     if (observed !== this.chainIdentifier) {
-      throw new LedgerIdentityMismatchError(this.chainIdentifier, observed);
+      throw new LedgerIdentityMismatchError(this.chainIdentifier.toString(), observed.toString());
     }
   }
 

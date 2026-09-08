@@ -1,4 +1,7 @@
 import {
+  CAPABILITY_NAMES,
+  isCanonicalAccount,
+  NETWORK_FAMILIES,
   NETWORK_IDENTIFIERS,
   USDC_BRIDGED_POLYGON_MAINNET_ADDRESS,
   USDC_POLYGON_AMOY_ADDRESS,
@@ -16,6 +19,7 @@ import {
   networkConfigurationFor,
   networksForEnvironment,
   registerLocalDevelopmentAsset,
+  requireEvmChainId,
 } from './network-configuration.js';
 
 const ALL_NETWORKS = Object.keys(NETWORK_CONFIGURATIONS) as NetworkIdentifier[];
@@ -27,15 +31,15 @@ describe('the network table', () => {
 
   it.each(ALL_NETWORKS)('describes %s completely', (network) => {
     const configuration = networkConfigurationFor(network);
-    expect(configuration.chainIdentifier).toBeGreaterThan(0);
+    expect(configuration.ledgerIdentity.length).toBeGreaterThan(0);
     expect(configuration.displayName.length).toBeGreaterThan(0);
     expect(configuration.requiredConfirmations).toBeGreaterThan(0);
     expect(configuration.maximumReorgDepth).toBeGreaterThan(0);
   });
 
-  it('gives every network a distinct chain identifier', () => {
+  it('gives every network a distinct ledger identity', () => {
     const identifiers = ALL_NETWORKS.map(
-      (network) => networkConfigurationFor(network).chainIdentifier,
+      (network) => networkConfigurationFor(network).ledgerIdentity,
     );
     expect(new Set(identifiers).size).toBe(identifiers.length);
   });
@@ -229,5 +233,114 @@ describe('the rules any new network must satisfy', () => {
       expect(NETWORK_IDENTIFIERS).toContain(network);
     }
     expect(ALL_NETWORKS).toHaveLength(NETWORK_IDENTIFIERS.length);
+  });
+});
+
+/**
+ * A capability flag is only worth declaring if something refuses when it is false. These assert the
+ * consequence rather than the value, so a flag cannot be flipped to true to make a feature look
+ * finished without the behaviour behind it also changing.
+ */
+describe('what each network says it can do', () => {
+  it.each(ALL_NETWORKS)('gives %s a family the adapters know', (network) => {
+    const configuration = networkConfigurationFor(network);
+    expect(NETWORK_FAMILIES).toContain(configuration.networkFamily);
+  });
+
+  it.each(ALL_NETWORKS)('keeps %s address form consistent with its family', (network) => {
+    const configuration = networkConfigurationFor(network);
+    const expected =
+      configuration.networkFamily === 'polygon' ? 'evm-lowercase-hex' : 'base58-exact';
+    expect(configuration.addressForm).toBe(expected);
+  });
+
+  /**
+   * TRON writes addresses in base58 and transaction ids in bare lowercase hex, so the two forms
+   * genuinely differ on one network and cannot be collapsed into a single per-network setting.
+   */
+  it.each(ALL_NETWORKS)('declares how %s names a transaction', (network) => {
+    const configuration = networkConfigurationFor(network);
+    const expected = { polygon: 'evm-hash', tron: 'bare-hex', solana: 'base58-exact' }[
+      configuration.networkFamily
+    ];
+    expect(configuration.referenceForm).toBe(expected);
+  });
+
+  it.each(ALL_NETWORKS)('stores every configured account in %s own canonical form', (network) => {
+    const configuration = networkConfigurationFor(network);
+    for (const asset of configuration.assetAllowlist) {
+      expect(isCanonicalAccount(configuration.addressForm, asset.reference)).toBe(true);
+    }
+    for (const denied of configuration.assetDenylist) {
+      expect(isCanonicalAccount(configuration.addressForm, denied.reference)).toBe(true);
+    }
+  });
+
+  /**
+   * A numeric chain id is an EVM idea. Inventing one for TRON or Solana so that a field could stay
+   * non-null is exactly how a chain-neutral seam stops being one.
+   */
+  it.each(ALL_NETWORKS)('only gives %s an EVM chain id if it is an EVM chain', (network) => {
+    const configuration = networkConfigurationFor(network);
+    const isEvm = configuration.networkFamily === 'polygon';
+    expect(configuration.evmChainId === null).toBe(!isEvm);
+
+    // Asserted without a branch: the helper hands back the id where there is one and refuses where
+    // there is not, so one comparison covers both networks that have a chain id and those that
+    // never will.
+    const resolved = ((): number | null => {
+      try {
+        return requireEvmChainId(configuration);
+      } catch {
+        return null;
+      }
+    })();
+    expect(resolved).toBe(configuration.evmChainId);
+  });
+
+  it.each(ALL_NETWORKS)('makes %s finality flag agree with the finality gate', (network) => {
+    const configuration = networkConfigurationFor(network);
+    expect(configuration.capabilities.supportsFinalityTracking).toBe(
+      configuration.requiresFinalityTag,
+    );
+  });
+
+  it.each(ALL_NETWORKS)('never lists an asset on %s if it refuses token payments', (network) => {
+    const configuration = networkConfigurationFor(network);
+    const listsAssetsWithoutClaimingThem =
+      configuration.assetAllowlist.length > 0 && !configuration.capabilities.supportsTokenPayments;
+    expect(listsAssetsWithoutClaimingThem).toBe(false);
+  });
+
+  /**
+   * Settlement signs and broadcasts. A network that claims it without a broadcaster would accept a
+   * custodial destination and then be unable to move the money off it.
+   */
+  it.each(ALL_NETWORKS)('only claims settlement on %s where signing exists', (network) => {
+    const configuration = networkConfigurationFor(network);
+    const claimsSettlementWithoutSigning =
+      configuration.capabilities.supportsSettlement && configuration.evmChainId === null;
+    expect(claimsSettlementWithoutSigning).toBe(false);
+  });
+
+  it.each(CAPABILITY_NAMES)('declares %s explicitly on every network', (flag) => {
+    for (const network of ALL_NETWORKS) {
+      expect(typeof networkConfigurationFor(network).capabilities[flag]).toBe('boolean');
+    }
+  });
+
+  /**
+   * A tripwire, and deliberately so. These three are false because the code behind them has not
+   * landed, and this test fails the moment somebody flips one without also implementing it. When
+   * the native scan path, the payment URI builders and Solana Pay arrive, this test is edited in
+   * the same commit as the behaviour it describes, which is the point.
+   */
+  it('claims no capability whose implementation has not landed', () => {
+    for (const network of ALL_NETWORKS) {
+      const { capabilities } = networkConfigurationFor(network);
+      expect(capabilities.supportsNativePayments).toBe(false);
+      expect(capabilities.supportsPaymentUri).toBe(false);
+      expect(capabilities.supportsMemo).toBe(false);
+    }
   });
 });

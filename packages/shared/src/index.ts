@@ -4,10 +4,12 @@
  * `@cryptopay/shared/server` and a lint rule enforces the split.
  */
 
+export * from './account-canonicalisation.js';
 export * from './api-contracts.js';
 export * from './chain-constants.js';
 export * from './ledger-primitives.js';
 export * from './money.js';
+export * from './network-descriptor.js';
 export * from './openapi.js';
 export * from './payment-state-machine.js';
 export * from './payment-status.js';

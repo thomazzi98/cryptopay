@@ -52,9 +52,14 @@ export class LedgerRangeTooWideError extends Error {
   }
 }
 
+/**
+ * Identities are compared as opaque strings. Two of the three supported families do not name
+ * themselves with a number - Solana uses a genesis hash and TRON a first-block identifier - so a
+ * numeric parameter here would have forced every non-EVM adapter to invent one.
+ */
 export class LedgerIdentityMismatchError extends Error {
-  constructor(expected: number, observed: number) {
-    super(`The endpoint reported chain ${observed} where ${expected} was configured`);
+  constructor(expected: string, observed: string) {
+    super(`The endpoint reported ledger ${observed} where ${expected} was configured`);
     this.name = 'LedgerIdentityMismatchError';
   }
 }

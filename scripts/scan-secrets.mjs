@@ -45,6 +45,22 @@ const SELF_REFERENTIAL_PATHS = new Set([
   'tools/secret-scanner.spec.mjs',
 ]);
 
+/**
+ * Values that genuinely have the shape of a credential and genuinely are not one.
+ *
+ * TRON names a transaction with sixty-four lowercase hex characters and no prefix, which is
+ * byte-for-byte the shape this scanner uses to recognise a private key. The shapes cannot be told
+ * apart, so real TRON transaction ids are listed here one at a time, by value.
+ *
+ * By value rather than by path, and one at a time rather than by pattern, for the same reason the
+ * gitleaks configuration works that way: excluding a file retires the scanner for everything that
+ * file will ever contain, and a spec is exactly where somebody eventually pastes a real key.
+ */
+const ALLOWED_VALUES = new Set([
+  // A real transfer on TRON Nile, read from TronGrid and used to prove reference canonicalisation.
+  'f0718be7e2f71a893c06d634382554a24c862bc54ab26cdb8224deff5f629802',
+]);
+
 const SKIPPED_PATHS = new Set(['package-lock.json']);
 const MAXIMUM_LISTING_BYTES = 16 * 1024 * 1024;
 
@@ -67,6 +83,15 @@ async function readIfText(path) {
   }
 }
 
+/**
+ * A finding is dismissed only when the line it sits on carries one of the listed values. Matching
+ * the line rather than the file keeps the exemption to the value that earned it.
+ */
+function isAllowedValue(contents, finding) {
+  const line = contents.split('\n')[finding.lineNumber - 1] ?? '';
+  return [...ALLOWED_VALUES].some((value) => line.includes(value));
+}
+
 async function main() {
   const files = await listTrackedFiles();
   const findings = Array.from(findTrackedEnvironmentFiles(files), (path) => ({
@@ -80,7 +105,9 @@ async function main() {
     if (contents === null) {
       continue;
     }
-    findings.push(...buildFindings(path, contents));
+    findings.push(
+      ...buildFindings(path, contents).filter((finding) => !isAllowedValue(contents, finding)),
+    );
   }
 
   if (findings.length === 0) {

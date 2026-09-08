@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import { NETWORK_IDENTIFIERS } from './ledger-primitives.js';
+import { CAPABILITY_NAMES, NETWORK_FAMILIES } from './network-descriptor.js';
 import { PAYMENT_STATUSES } from './payment-status.js';
 import { SETTLEMENT_STATUSES } from './settlement-status.js';
 
@@ -107,6 +108,27 @@ export const WebhookDeliveryIdentifierSchema = prefixedIdentifier(
 export const NetworkIdentifierSchema = z
   .enum(NETWORK_IDENTIFIERS as unknown as [string, ...string[]])
   .meta({ description: 'The blockchain network a payment settles on' });
+
+export const NetworkFamilySchema = z
+  .enum(NETWORK_FAMILIES as unknown as [string, ...string[]])
+  .meta({ description: 'The chain family a network belongs to' });
+
+/**
+ * Every flag is false on at least one network and drives a refusal a test exercises. A capability
+ * that is true everywhere documents nothing, and one that is true where the code cannot honour it
+ * is exactly the faked functionality the contract must never advertise.
+ */
+export const NetworkCapabilitiesSchema = z
+  .object({
+    supportsNativePayments: z.boolean(),
+    supportsTokenPayments: z.boolean(),
+    supportsPaymentUri: z.boolean(),
+    supportsEventMonitoring: z.boolean(),
+    supportsFinalityTracking: z.boolean(),
+    supportsMemo: z.boolean(),
+    supportsSettlement: z.boolean(),
+  })
+  .meta({ id: 'NetworkCapabilities' });
 
 export const EnvironmentSchema = z
   .enum(['live', 'test'])
@@ -218,7 +240,10 @@ export const PaymentSchema = z
     }),
     environment: EnvironmentSchema,
     network: NetworkIdentifierSchema,
-    chainIdentifier: z.number().int().positive(),
+    chainIdentifier: z.number().int().positive().nullable().meta({
+      description:
+        'The EVM chain id, or null on a network whose family has no numeric chain identity. TRON and Solana identify themselves by a genesis or first-block reference instead.',
+    }),
     asset: AssetSchema,
     requestedAmount: AmountSchema,
     creditedAmount: AmountSchema,
@@ -293,7 +318,10 @@ export const CheckoutSchema = z
   .object({
     status: PaymentStatusSchema,
     network: NetworkIdentifierSchema,
-    chainIdentifier: z.number().int().positive(),
+    chainIdentifier: z.number().int().positive().nullable().meta({
+      description:
+        'The EVM chain id, or null on a network whose family has no numeric chain identity. TRON and Solana identify themselves by a genesis or first-block reference instead.',
+    }),
     networkDisplayName: z.string(),
     environment: EnvironmentSchema,
     asset: AssetSchema,
@@ -421,7 +449,20 @@ export const ProblemDetailsSchema = z
 export const NetworkDescriptorSchema = z
   .object({
     network: NetworkIdentifierSchema,
-    chainIdentifier: z.number().int().positive(),
+    networkFamily: NetworkFamilySchema,
+    ledgerIdentity: z.string().meta({
+      description:
+        'What the chain calls itself, compared as an opaque string when a connection is opened. Asserting it is what stops an endpoint quietly serving a different chain.',
+    }),
+    addressForm: z.enum(['evm-lowercase-hex', 'base58-exact']).meta({
+      description:
+        'How an account is written on this network. Base58 is case sensitive, so a lowercased TRON or Solana address is a different address that nobody controls.',
+    }),
+    capabilities: NetworkCapabilitiesSchema,
+    chainIdentifier: z.number().int().positive().nullable().meta({
+      description:
+        'The EVM chain id, or null on a network whose family has no numeric chain identity. TRON and Solana identify themselves by a genesis or first-block reference instead.',
+    }),
     displayName: z.string(),
     environment: EnvironmentSchema,
     nativeCurrency: z.object({ symbol: z.string(), decimals: z.number().int() }),
@@ -681,3 +722,20 @@ export type Amount = z.infer<typeof AmountSchema>;
 export type Asset = z.infer<typeof AssetSchema>;
 export type Metadata = z.infer<typeof MetadataSchema>;
 export type CallbackUrl = z.infer<typeof CallbackUrlSchema>;
+
+/**
+ * The contract and the capability record are written out separately, so this asserts at import time
+ * that neither grew a flag the other does not publish. A capability the API cannot describe is one
+ * an integrator cannot check before sending money.
+ */
+const publishedCapabilities = Object.keys(NetworkCapabilitiesSchema.shape).toSorted((left, right) =>
+  left.localeCompare(right),
+);
+const declaredCapabilities = [...CAPABILITY_NAMES].toSorted((left, right) =>
+  left.localeCompare(right),
+);
+if (publishedCapabilities.join(',') !== declaredCapabilities.join(',')) {
+  throw new Error(
+    `Network capability contract drift: published ${publishedCapabilities.join(',')} against declared ${declaredCapabilities.join(',')}`,
+  );
+}

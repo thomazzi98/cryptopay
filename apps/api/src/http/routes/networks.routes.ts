@@ -31,7 +31,11 @@ export interface NetworkRouteDependencies {
 function describe(configuration: Configuration, network: NetworkConfiguration): NetworkDescriptor {
   return {
     network: network.networkIdentifier,
-    chainIdentifier: network.chainIdentifier,
+    chainIdentifier: network.evmChainId,
+    networkFamily: network.networkFamily,
+    ledgerIdentity: network.ledgerIdentity,
+    addressForm: network.addressForm,
+    capabilities: network.capabilities,
     displayName: network.displayName,
     environment: network.environment,
     nativeCurrency: network.nativeCurrency,

@@ -28,7 +28,7 @@ export function presentCheckout(
   return {
     status: payment.status,
     network: payment.networkIdentifier,
-    chainIdentifier: configuration.chainIdentifier,
+    chainIdentifier: configuration.evmChainId,
     networkDisplayName: configuration.displayName,
     environment: payment.environment,
     asset: {

@@ -46,7 +46,7 @@ export function presentPayment(
     statusVersion: payment.statusVersion,
     environment: payment.environment,
     network: payment.networkIdentifier,
-    chainIdentifier: configuration.chainIdentifier,
+    chainIdentifier: configuration.evmChainId,
     asset: {
       reference: payment.asset.reference,
       symbol: payment.asset.symbol,

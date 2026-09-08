@@ -10,7 +10,11 @@ import {
   USDC_DECIMALS,
   USDC_POLYGON_AMOY_ADDRESS,
   USDC_POLYGON_MAINNET_ADDRESS,
+  type AddressForm,
+  type ReferenceForm,
   type Environment,
+  type NetworkCapabilities,
+  type NetworkFamily,
   type NetworkIdentifier,
 } from '@cryptopay/shared';
 
@@ -40,7 +44,19 @@ interface DeniedAsset {
 
 export interface NetworkConfiguration {
   readonly networkIdentifier: NetworkIdentifier;
-  readonly chainIdentifier: number;
+  readonly networkFamily: NetworkFamily;
+  /**
+   * The chain's own name for itself, compared as an opaque string. On an EVM chain this is the
+   * decimal chain id; on Solana it is the genesis hash; on TRON the first block's identifier. The
+   * comparison is what stops an endpoint quietly serving a different chain, and it must not assume
+   * the identity is a number, because on two of the three families it is not.
+   */
+  readonly ledgerIdentity: string;
+  /** Present only where the family genuinely has one. Used for EIP-681 and the public chainId. */
+  readonly evmChainId: number | null;
+  readonly addressForm: AddressForm;
+  readonly referenceForm: ReferenceForm;
+  readonly capabilities: NetworkCapabilities;
   readonly displayName: string;
   readonly environment: Environment;
   readonly nativeCurrency: { readonly symbol: string; readonly decimals: number };
@@ -57,7 +73,23 @@ export const NETWORK_CONFIGURATIONS: Readonly<Record<NetworkIdentifier, NetworkC
   Object.freeze({
     'polygon-mainnet': Object.freeze({
       networkIdentifier: 'polygon-mainnet',
-      chainIdentifier: POLYGON_MAINNET_CHAIN_IDENTIFIER,
+      networkFamily: 'polygon',
+      ledgerIdentity: String(POLYGON_MAINNET_CHAIN_IDENTIFIER),
+      evmChainId: POLYGON_MAINNET_CHAIN_IDENTIFIER,
+      addressForm: 'evm-lowercase-hex',
+      referenceForm: 'evm-hash',
+      capabilities: Object.freeze({
+        // Native POL payments are watched only once the block-body scan path lands; declaring the
+        // flag true before then would be the exact "fake an unsupported capability" the brief bans.
+        supportsNativePayments: false,
+        supportsTokenPayments: true,
+        // Flipped on with the EIP-681 builder.
+        supportsPaymentUri: false,
+        supportsEventMonitoring: true,
+        supportsFinalityTracking: true,
+        supportsMemo: false,
+        supportsSettlement: true,
+      }),
       displayName: 'Polygon',
       environment: 'live',
       nativeCurrency: {
@@ -80,7 +112,23 @@ export const NETWORK_CONFIGURATIONS: Readonly<Record<NetworkIdentifier, NetworkC
 
     'polygon-amoy': Object.freeze({
       networkIdentifier: 'polygon-amoy',
-      chainIdentifier: POLYGON_AMOY_CHAIN_IDENTIFIER,
+      networkFamily: 'polygon',
+      ledgerIdentity: String(POLYGON_AMOY_CHAIN_IDENTIFIER),
+      evmChainId: POLYGON_AMOY_CHAIN_IDENTIFIER,
+      addressForm: 'evm-lowercase-hex',
+      referenceForm: 'evm-hash',
+      capabilities: Object.freeze({
+        // Native POL payments are watched only once the block-body scan path lands; declaring the
+        // flag true before then would be the exact "fake an unsupported capability" the brief bans.
+        supportsNativePayments: false,
+        supportsTokenPayments: true,
+        // Flipped on with the EIP-681 builder.
+        supportsPaymentUri: false,
+        supportsEventMonitoring: true,
+        supportsFinalityTracking: true,
+        supportsMemo: false,
+        supportsSettlement: true,
+      }),
       displayName: 'Polygon Amoy',
       environment: 'test',
       nativeCurrency: {
@@ -101,7 +149,21 @@ export const NETWORK_CONFIGURATIONS: Readonly<Record<NetworkIdentifier, NetworkC
 
     'local-anvil': Object.freeze({
       networkIdentifier: 'local-anvil',
-      chainIdentifier: LOCAL_ANVIL_CHAIN_IDENTIFIER,
+      networkFamily: 'polygon',
+      ledgerIdentity: String(LOCAL_ANVIL_CHAIN_IDENTIFIER),
+      evmChainId: LOCAL_ANVIL_CHAIN_IDENTIFIER,
+      addressForm: 'evm-lowercase-hex',
+      referenceForm: 'evm-hash',
+      capabilities: Object.freeze({
+        supportsNativePayments: false,
+        supportsTokenPayments: true,
+        supportsPaymentUri: false,
+        supportsEventMonitoring: true,
+        // A development chain publishes no finality tag, so there is nothing to track.
+        supportsFinalityTracking: false,
+        supportsMemo: false,
+        supportsSettlement: true,
+      }),
       displayName: 'Local Anvil',
       environment: 'test',
       nativeCurrency: { symbol: 'ETH', decimals: 18 },
@@ -146,6 +208,19 @@ export function networkConfigurationFor(network: NetworkIdentifier): NetworkConf
     return configuration;
   }
   return { ...configuration, assetAllowlist: localDevelopmentAssets };
+}
+
+/**
+ * The numeric chain id an EVM adapter needs. Non-EVM families have none, so asking for one is a
+ * configuration error rather than something to paper over with a zero.
+ */
+export function requireEvmChainId(configuration: NetworkConfiguration): number {
+  if (configuration.evmChainId === null) {
+    throw new Error(
+      `${configuration.networkIdentifier} is a ${configuration.networkFamily} network and has no EVM chain id`,
+    );
+  }
+  return configuration.evmChainId;
 }
 
 export function networksForEnvironment(environment: Environment): readonly NetworkConfiguration[] {

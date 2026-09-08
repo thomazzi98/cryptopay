@@ -24,6 +24,7 @@ import { EvmSettlementBroadcaster } from './infrastructure/chain/evm-settlement-
 import {
   NETWORK_CONFIGURATIONS,
   registerLocalDevelopmentAsset,
+  requireEvmChainId,
 } from './infrastructure/chain/network-configuration.js';
 import { BlockCursorRepository } from './infrastructure/persistence/block-cursor.repository.js';
 import { ChainScanStore } from './infrastructure/persistence/chain-scan.store.js';
@@ -246,7 +247,7 @@ export function composeChainWorker(
       const rpcUrls = rpcUrlsFor(configuration, network.networkIdentifier);
       const gateway = new EvmChainGateway({
         networkIdentifier: network.networkIdentifier,
-        chainIdentifier: network.chainIdentifier,
+        chainIdentifier: requireEvmChainId(network),
         rpcUrls,
         supportsFinalityTag: network.requiresFinalityTag,
         // The endpoints after the first, so the second opinion never comes from the endpoint that
@@ -364,7 +365,7 @@ export async function composeSettlementWorker(
 
       const broadcaster = new EvmSettlementBroadcaster({
         networkIdentifier: network.networkIdentifier,
-        chainIdentifier: network.chainIdentifier,
+        chainIdentifier: requireEvmChainId(network),
         displayName: network.displayName,
         nativeCurrencySymbol: network.nativeCurrency.symbol,
         nativeCurrencyDecimals: network.nativeCurrency.decimals,
@@ -376,7 +377,7 @@ export async function composeSettlementWorker(
 
       const gateway = new EvmChainGateway({
         networkIdentifier: network.networkIdentifier,
-        chainIdentifier: network.chainIdentifier,
+        chainIdentifier: requireEvmChainId(network),
         rpcUrls,
         supportsFinalityTag: network.requiresFinalityTag,
       });
