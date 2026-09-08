@@ -1,3 +1,5 @@
+import { resolve } from 'node:path';
+
 import type { NextConfig } from 'next';
 
 /**
@@ -14,6 +16,15 @@ const configuration: NextConfig = {
   poweredByHeader: false,
   transpilePackages: ['@cryptopay/shared'],
   typedRoutes: true,
+
+  // Traces exactly the files the server needs, so the image carries those instead of a node_modules
+  // holding the whole toolchain.
+  output: 'standalone',
+
+  // Without this the trace root is inferred from the nearest lockfile and stops at apps/web, which
+  // silently leaves the workspace packages out of the image: the build succeeds and the container
+  // then fails to start on a module it cannot find.
+  outputFileTracingRoot: resolve(import.meta.dirname, '../..'),
 };
 
 export default configuration;

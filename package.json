@@ -28,7 +28,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "knip": "knip",
-    "prepare": "husky",
+    "prepare": "node scripts/install-git-hooks.mjs",
     "build": "tsc --build",
     "test:coverage": "vitest run --coverage",
     "docs:generate": "node scripts/verify-docs.mjs --write",

@@ -8,6 +8,9 @@ FROM node:24.11.1-bookworm-slim AS build
 WORKDIR /repository
 
 COPY package.json package-lock.json ./
+# The root `prepare` script runs before any source is copied, so the one file it needs comes first.
+# It installs git hooks where there is a git repository and does nothing here, which is the point.
+COPY scripts/install-git-hooks.mjs scripts/
 COPY packages/shared/package.json packages/shared/
 COPY apps/web/package.json apps/web/
 RUN npm ci --workspace @cryptopay/shared --workspace @cryptopay/web --include-workspace-root

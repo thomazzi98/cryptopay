@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 
 import { verifyWebhook } from '@cryptopay/shared/server';
@@ -18,10 +19,44 @@ import { verifyWebhook } from '@cryptopay/shared/server';
  */
 
 const PORT = Number(process.env.PORT ?? '8080');
-const SIGNING_SECRETS = (process.env.WEBHOOK_SIGNING_SECRETS ?? '')
-  .split(',')
-  .map((entry) => entry.trim())
-  .filter((entry) => entry !== '');
+
+/**
+ * The secrets, from a variable or from a file.
+ *
+ * The file exists for `docker compose up`: the secret is generated at first start, so there is
+ * nothing to put in a variable ahead of time, and a committed default would be a real signing secret
+ * living in a repository. The bootstrap writes the merchant's active secrets to a volume this
+ * container mounts read-only, which is the merchant reading their own secret rather than a shared
+ * one invented for the demo.
+ *
+ * Read once, at start. A merchant rotating a secret restarts their receiver, which is exactly what
+ * makes the overlap during rotation necessary.
+ */
+function loadSigningSecrets(): string[] {
+  const fromVariable = process.env.WEBHOOK_SIGNING_SECRETS ?? '';
+  const path = process.env.WEBHOOK_SIGNING_SECRETS_FILE;
+  const fromFile = readSecretsFile(path);
+  return `${fromVariable},${fromFile}`
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter((entry) => entry !== '');
+}
+
+function readSecretsFile(path: string | undefined): string {
+  if (path === undefined || path === '') {
+    return '';
+  }
+  try {
+    return readFileSync(path, 'utf8');
+  } catch {
+    // Missing is a normal state on a first start where nothing has bootstrapped yet. The receiver
+    // then answers 503 to every callback, which says so plainly, rather than failing to start.
+    process.stdout.write(`No signing secrets at ${path} yet.\n`);
+    return '';
+  }
+}
+
+const SIGNING_SECRETS = loadSigningSecrets();
 
 const MAXIMUM_BODY_BYTES = 65_536;
 const seenEventIdentifiers = new Set<string>();
