@@ -40,6 +40,10 @@ $$;
 GRANT CONNECT ON DATABASE cryptopay TO cryptopay_api;
 GRANT USAGE ON SCHEMA public TO cryptopay_api;
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO cryptopay_api;
+-- The API reports settlement and never performs it: it cannot sign, so it must not be able to
+-- change what a signer decided.
+REVOKE INSERT, UPDATE, DELETE ON settlements, chain_transactions, chain_accounts, treasury_accounts
+  FROM cryptopay_api;
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO cryptopay_api;
 
 -- The chain worker: it writes what it observed and moves the cursor. It never issues an API key and
@@ -71,7 +75,7 @@ GRANT USAGE, SELECT ON SEQUENCE webhook_delivery_attempts_id_seq TO cryptopay_ca
 -- money, and this is the one place both are visible.
 GRANT CONNECT ON DATABASE cryptopay TO cryptopay_settlement_worker;
 GRANT USAGE ON SCHEMA public TO cryptopay_settlement_worker;
-GRANT SELECT, INSERT, UPDATE ON settlements, chain_transactions, chain_accounts
+GRANT SELECT, INSERT, UPDATE ON settlements, chain_transactions, chain_accounts, treasury_accounts
   TO cryptopay_settlement_worker;
 GRANT SELECT ON payments, payment_addresses, payout_destinations, merchants
   TO cryptopay_settlement_worker;
@@ -83,7 +87,7 @@ GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO cryptopay_settlement_wo
 -- cannot quietly hand the callback worker the payments table.
 REVOKE ALL ON payments, api_keys, wallet_seeds, payment_addresses FROM cryptopay_callback_worker;
 REVOKE ALL ON wallet_seeds, api_keys FROM cryptopay_chain_worker;
-REVOKE ALL ON api_keys, webhook_secrets, webhook_deliveries, idempotency_records
+REVOKE ALL ON api_keys, webhook_secrets, webhook_deliveries, idempotency_keys
   FROM cryptopay_settlement_worker;
 
 -- The settlement worker reads payments to find what is worth settling and must never change one.

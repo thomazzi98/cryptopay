@@ -192,6 +192,7 @@ export function registerSettlementRoutes(
 
           return {
             network: treasury.networkIdentifier,
+            displayName: network.displayName,
             environment: treasury.environment,
             account: treasury.account,
             nativeCurrency: network.nativeCurrency,

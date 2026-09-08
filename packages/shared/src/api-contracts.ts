@@ -544,6 +544,7 @@ export const SetPayoutDestinationRequestSchema = z
 export const TreasuryReportSchema = z
   .object({
     network: NetworkIdentifierSchema,
+    displayName: z.string(),
     environment: EnvironmentSchema,
     account: AccountSchema.meta({
       description: 'The account that pays for gas. Fund this to let settlement run.',

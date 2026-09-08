@@ -81,7 +81,7 @@ export function TreasuryCard({ report }: { report: TreasuryReport }) {
   return (
     <Card>
       <CardHeader
-        title={report.network}
+        title={report.displayName}
         description="The account settlement pays gas from, and the ceiling on what it may ever spend."
       />
       <CardBody className="space-y-4">
@@ -144,7 +144,7 @@ export function TreasuryCard({ report }: { report: TreasuryReport }) {
         {isEmpty && (
           <p role="alert" className="text-xs text-status-underpaid">
             This treasury holds nothing, so no sweep can be funded and every settlement on{' '}
-            {report.network} will wait. Send {symbol} to the address above.
+            {report.displayName} will wait. Send {symbol} to the address above.
           </p>
         )}
       </CardBody>

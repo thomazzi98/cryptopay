@@ -35,8 +35,21 @@ export function truncateReference(value: string, lead = 6, tail = 4): string {
   return `${value.slice(0, lead)}…${value.slice(-tail)}`;
 }
 
+/**
+ * One locale for the whole interface, rather than the viewer's.
+ *
+ * The copy on these screens is English and cannot be translated, so following the browser's locale
+ * produced an interface that was English everywhere except its dates — a payment row reading
+ * "há 12 horas" beside an English column header. It also made a screenshot from one machine
+ * disagree with the same screen on another, which for an operational tool is worse than a date
+ * nobody's locale would have chosen.
+ *
+ * The clock is still the viewer's. Only the words are fixed.
+ */
+const INTERFACE_LOCALE = 'en-GB';
+
 export function formatTimestamp(isoTimestamp: string): string {
-  return new Date(isoTimestamp).toLocaleString(undefined, {
+  return new Date(isoTimestamp).toLocaleString(INTERFACE_LOCALE, {
     year: 'numeric',
     month: 'short',
     day: '2-digit',
@@ -47,7 +60,7 @@ export function formatTimestamp(isoTimestamp: string): string {
 }
 
 export function formatShortTimestamp(isoTimestamp: string): string {
-  return new Date(isoTimestamp).toLocaleString(undefined, {
+  return new Date(isoTimestamp).toLocaleString(INTERFACE_LOCALE, {
     month: 'short',
     day: '2-digit',
     hour: '2-digit',
@@ -67,7 +80,7 @@ const RELATIVE_UNITS: readonly (readonly [Intl.RelativeTimeFormatUnit, number])[
 
 /** `now` is passed in so a server render and the hydration that follows cannot disagree. */
 export function formatRelative(isoTimestamp: string, now: number): string {
-  const formatter = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' });
+  const formatter = new Intl.RelativeTimeFormat(INTERFACE_LOCALE, { numeric: 'auto' });
   let delta = (new Date(isoTimestamp).getTime() - now) / 1000;
 
   for (const [unit, size] of RELATIVE_UNITS) {
