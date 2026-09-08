@@ -42,7 +42,12 @@ export function EnvironmentSeparation({ environment }: { environment: Merchant['
           <p className="text-xs font-medium tracking-wide text-text-subtle uppercase">
             The constraint
           </p>
-          <pre className="mt-2 overflow-x-auto font-mono text-xs leading-relaxed text-text">
+          <pre
+            tabIndex={0}
+            role="region"
+            aria-label="The environment and network check constraint on the payments table"
+            className="mt-2 overflow-x-auto font-mono text-xs leading-relaxed text-text"
+          >
             {CONSTRAINT_SOURCE}
           </pre>
         </div>

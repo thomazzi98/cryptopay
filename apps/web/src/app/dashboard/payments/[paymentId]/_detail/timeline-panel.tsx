@@ -33,11 +33,11 @@ export function TimelinePanel({
     refetchInterval: pollIntervalMilliseconds,
   });
 
-  if (timelineQuery.isPending) {
-    return <SkeletonRows rows={4} />;
-  }
+  const timeline = timelineQuery.data;
 
-  if (timelineQuery.isError) {
+  // A failed refetch keeps the last good timeline, so the failure replaces the list only when there
+  // is no list to keep.
+  if (timeline === undefined && timelineQuery.isError) {
     return (
       <ErrorState
         title="The timeline could not be loaded"
@@ -55,9 +55,11 @@ export function TimelinePanel({
     );
   }
 
-  const entries = timelineQuery.data.toSorted(
-    (first, second) => first.statusVersion - second.statusVersion,
-  );
+  if (timeline === undefined) {
+    return <SkeletonRows rows={4} />;
+  }
+
+  const entries = timeline.toSorted((first, second) => first.statusVersion - second.statusVersion);
 
   if (entries.length === 0) {
     return (
@@ -119,7 +121,7 @@ export function TimelinePanel({
                   {formatTimestamp(entry.occurredAt)}
                 </span>
                 {now !== null && (
-                  <span className="text-xs text-text-subtle">
+                  <span className="tabular text-xs text-text-subtle">
                     {formatRelative(entry.occurredAt, now)}
                   </span>
                 )}

@@ -63,6 +63,7 @@ export function SimulatorScreen() {
 
   const paymentQuery = usePaymentQuery(identifier);
   const payment = paymentQuery.data ?? null;
+  const isLoadingPayment = identifier !== null && paymentQuery.isPending;
   const isFinal =
     payment !== null && isPaymentStatus(payment.status) && isTerminalPaymentStatus(payment.status);
 
@@ -96,12 +97,12 @@ export function SimulatorScreen() {
 
       <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-4">
         <CreatePane onCreated={accept} />
-        <PayPane payment={payment} />
+        <PayPane payment={payment} isLoading={isLoadingPayment} paymentError={paymentQuery.error} />
         <VerifyPane
           identifier={identifier}
           payment={payment}
           isFinal={isFinal}
-          isLoading={identifier !== null && paymentQuery.isPending}
+          isLoading={isLoadingPayment}
           paymentError={paymentQuery.error}
           updatedAt={paymentQuery.dataUpdatedAt}
         />

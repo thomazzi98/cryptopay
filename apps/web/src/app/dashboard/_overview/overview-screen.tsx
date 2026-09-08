@@ -31,10 +31,19 @@ import { StatusDistribution } from './status-distribution';
  *
  * Two polls, at two rates, because the data moves at two rates: a payment list changes as customers
  * pay, and a readiness report changes when an operator or a chain does something.
+ *
+ * A failed poll keeps the data the last successful one returned, so a failure may only replace the
+ * screen when there is nothing behind it. Otherwise it is said over figures that are still real:
+ * telling a merchant the overview could not be built while a correct overview is on screen is false.
  */
 
 const PAYMENTS_REFETCH_MILLISECONDS = 15_000;
 const READINESS_REFETCH_MILLISECONDS = 30_000;
+const CLOCK_TICK_MILLISECONDS = 30_000;
+
+const DISTRIBUTION_DESCRIPTION =
+  'Every status present in the payments counted here, not only the last 7 days.';
+const RECENT_DESCRIPTION = 'The ten most recently created.';
 
 function describeFailure(error: unknown): string {
   if (error instanceof ApiError) {
@@ -46,13 +55,58 @@ function describeFailure(error: unknown): string {
   return 'The request failed and said nothing about why.';
 }
 
+function StaleDataBanner({
+  message,
+  detail,
+  onRetry,
+}: {
+  message: string;
+  detail: string;
+  onRetry: () => void;
+}) {
+  return (
+    <div
+      role="status"
+      className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 rounded-lg border border-health-degraded bg-health-degraded-soft px-3 py-2 text-xs text-health-degraded"
+    >
+      <p className="min-w-0">
+        <span className="font-medium">{message}</span> {detail}
+      </p>
+      <Button size="small" onClick={onRetry}>
+        Refresh
+      </Button>
+    </div>
+  );
+}
+
+function OverviewSkeleton() {
+  return (
+    <>
+      <KpiRowSkeleton />
+      <Skeleton className="h-3 w-full max-w-lg" />
+
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+        <Card className="lg:col-span-1">
+          <CardHeader title="Status distribution" description={DISTRIBUTION_DESCRIPTION} />
+          <SkeletonRows rows={4} />
+        </Card>
+
+        <Card className="lg:col-span-2">
+          <CardHeader title="Recent payments" description={RECENT_DESCRIPTION} />
+          <SkeletonRows rows={6} />
+        </Card>
+      </div>
+    </>
+  );
+}
+
 export function OverviewScreen() {
   const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
     const timer = setInterval(() => {
       setNow(Date.now());
-    }, 30_000);
+    }, CLOCK_TICK_MILLISECONDS);
     return () => {
       clearInterval(timer);
     };
@@ -60,16 +114,14 @@ export function OverviewScreen() {
 
   const payments = useQuery({
     queryKey: ['overview', 'payments'],
-    // TanStack names its loader option `queryFn`, which the naming rule rejects and no rename can
-    // fix. A computed key states the library's name without declaring an abbreviated identifier.
-    ['queryFn']: ({ signal }: { signal: AbortSignal }) =>
+    queryFn: ({ signal }: { signal: AbortSignal }) =>
       callApi<PaymentList>('v1/payments?limit=100', { signal }),
     refetchInterval: PAYMENTS_REFETCH_MILLISECONDS,
   });
 
   const readiness = useQuery({
     queryKey: ['overview', 'readiness'],
-    ['queryFn']: () => fetchReadiness(),
+    queryFn: () => fetchReadiness(),
     refetchInterval: READINESS_REFETCH_MILLISECONDS,
   });
 
@@ -82,16 +134,28 @@ export function OverviewScreen() {
   }, [paymentsData, now]);
 
   const readinessReport = readiness.data;
+  const paymentsFailure = payments.isError ? describeFailure(payments.error) : null;
+  const readinessFailure = readiness.isError ? describeFailure(readiness.error) : null;
 
   return (
     <div className="space-y-6">
-      {payments.isPending && <KpiRowSkeleton />}
+      {paymentsFailure !== null && metrics !== null && (
+        <StaleDataBanner
+          message="These figures are the ones from the last successful load; the latest refresh failed."
+          detail={paymentsFailure}
+          onRetry={() => {
+            void payments.refetch();
+          }}
+        />
+      )}
 
-      {payments.isError && (
+      {payments.isPending && <OverviewSkeleton />}
+
+      {paymentsFailure !== null && metrics === null && (
         <Card>
           <ErrorState
             title="The overview could not be built"
-            detail={describeFailure(payments.error)}
+            detail={paymentsFailure}
             action={
               <Button
                 onClick={() => {
@@ -131,10 +195,7 @@ export function OverviewScreen() {
 
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
             <Card className="lg:col-span-1">
-              <CardHeader
-                title="Status distribution"
-                description="Every status present in this window."
-              />
+              <CardHeader title="Status distribution" description={DISTRIBUTION_DESCRIPTION} />
               <CardBody>
                 <StatusDistribution distribution={metrics.distribution} />
               </CardBody>
@@ -143,7 +204,7 @@ export function OverviewScreen() {
             <Card className="lg:col-span-2">
               <CardHeader
                 title="Recent payments"
-                description="The ten most recently created."
+                description={RECENT_DESCRIPTION}
                 action={
                   <Link
                     href="/dashboard/payments"
@@ -171,10 +232,10 @@ export function OverviewScreen() {
             <SkeletonRows rows={3} className="p-0" />
           </CardBody>
         )}
-        {readiness.isError && (
+        {readinessFailure !== null && readinessReport === undefined && (
           <ErrorState
             title="Readiness could not be read"
-            detail={describeFailure(readiness.error)}
+            detail={readinessFailure}
             action={
               <Button
                 onClick={() => {
@@ -187,7 +248,16 @@ export function OverviewScreen() {
           />
         )}
         {readinessReport !== undefined && (
-          <CardBody>
+          <CardBody className="space-y-4">
+            {readinessFailure !== null && (
+              <StaleDataBanner
+                message="This report is the last one that was read; the latest check failed."
+                detail={readinessFailure}
+                onRetry={() => {
+                  void readiness.refetch();
+                }}
+              />
+            )}
             <HealthStrip report={readinessReport} />
           </CardBody>
         )}

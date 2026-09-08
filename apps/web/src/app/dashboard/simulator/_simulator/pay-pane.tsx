@@ -3,10 +3,17 @@
 import type { Payment } from '@cryptopay/shared';
 
 import { Amount, Copyable, Field } from '@/components/ui/data';
-import { Card, CardBody, CardHeader, EmptyState } from '@/components/ui/surfaces';
+import {
+  Card,
+  CardBody,
+  CardHeader,
+  EmptyState,
+  ErrorState,
+  SkeletonRows,
+} from '@/components/ui/surfaces';
 import { formatTimestamp } from '@/lib/format';
 
-import { networkLabel } from './presentation';
+import { networkLabel, readErrorDetail } from './presentation';
 
 /**
  * Everything needed to pay from somewhere that is not this browser.
@@ -15,7 +22,36 @@ import { networkLabel } from './presentation';
  * offered together on purpose. A payment that can only be made from the page that created it
  * proves nothing about where the backend gets its truth.
  */
-export function PayPane({ payment }: { payment: Payment | null }) {
+export function PayPane({
+  payment,
+  isLoading,
+  paymentError,
+}: {
+  payment: Payment | null;
+  isLoading: boolean;
+  paymentError: Error | null;
+}) {
+  if (isLoading) {
+    return (
+      <Card>
+        <CardHeader title="2. Pay" description="Where the money is sent, and how." />
+        <SkeletonRows rows={5} />
+      </Card>
+    );
+  }
+
+  // A failed read must never fall through to the empty state, which would say the payment does not
+  // exist. A read that failed while an address is already on screen keeps the address: the verify
+  // pane names the failing source, and hiding the address over one failed poll helps nobody.
+  if (payment === null && paymentError !== null) {
+    return (
+      <Card>
+        <CardHeader title="2. Pay" description="Where the money is sent, and how." />
+        <ErrorState title="This payment could not be read" detail={readErrorDetail(paymentError)} />
+      </Card>
+    );
+  }
+
   if (payment === null) {
     return (
       <Card>

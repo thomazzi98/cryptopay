@@ -13,11 +13,16 @@ import { describeStatus } from '@/lib/payment-status';
 import { describeNetwork } from './filters';
 
 /**
- * A grid rather than a table element, for one reason: the whole row is the link target.
+ * A list of links laid out on a grid, rather than a table, for one reason: the whole row is the
+ * link target.
  *
  * An anchor cannot wrap a `tr`, and an anchor stretched over a row with absolute positioning misses
  * in enough browsers to be a bug rather than a detail. The grid keeps the columns aligned and lets
  * each row be a single link, so the click target is the row a reader is already pointing at.
+ *
+ * There are no table ARIA roles here on purpose. `role` overrides native semantics, so a `role="row"`
+ * on the anchor exposes it as a row and never as a link: nothing tells a screen reader the row can
+ * be opened, and it is missing from the links list. The rows are a `ul` and each link stays a link.
  */
 
 const COLUMNS =
@@ -46,7 +51,6 @@ function PaymentRow({ payment }: { payment: Payment }) {
   return (
     <Link
       href={`/dashboard/payments/${payment.identifier}`}
-      role="row"
       className={classNames(
         COLUMNS,
         'items-center border-l-2 border-b border-border px-5 py-2.5 text-sm transition-colors',
@@ -54,7 +58,7 @@ function PaymentRow({ payment }: { payment: Payment }) {
       )}
       style={{ borderLeftColor: accentToken(payment.status) }}
     >
-      <span role="cell">
+      <span>
         {isPaymentStatus(payment.status) ? (
           <StatusBadge status={payment.status} />
         ) : (
@@ -62,7 +66,7 @@ function PaymentRow({ payment }: { payment: Payment }) {
         )}
       </span>
 
-      <span role="cell" className="text-right">
+      <span className="text-right">
         <Amount
           display={payment.requestedAmount.display}
           symbol={payment.asset.symbol}
@@ -70,7 +74,7 @@ function PaymentRow({ payment }: { payment: Payment }) {
         />
       </span>
 
-      <span role="cell" className="text-right">
+      <span className="text-right">
         <Amount
           display={payment.creditedAmount.display}
           symbol={payment.asset.symbol}
@@ -78,19 +82,15 @@ function PaymentRow({ payment }: { payment: Payment }) {
         />
       </span>
 
-      <span role="cell" className="truncate text-text-muted">
-        {describeNetwork(payment.network)}
-      </span>
+      <span className="truncate text-text-muted">{describeNetwork(payment.network)}</span>
 
-      <span role="cell" className="truncate text-text">
+      <span className="truncate text-text">
         {payment.merchantReference ?? <span className="text-text-subtle">Not set</span>}
       </span>
 
-      <span role="cell" className="tabular text-text-muted">
-        {formatShortTimestamp(payment.createdAt)}
-      </span>
+      <span className="tabular text-text-muted">{formatShortTimestamp(payment.createdAt)}</span>
 
-      <span role="cell" className="tabular truncate font-mono text-xs text-text-subtle">
+      <span className="tabular truncate font-mono text-xs text-text-subtle">
         {truncateReference(payment.identifier, 10, 6)}
       </span>
     </Link>
@@ -100,9 +100,8 @@ function PaymentRow({ payment }: { payment: Payment }) {
 export function PaymentsTable({ payments }: { payments: readonly Payment[] }) {
   return (
     <div className="overflow-x-auto">
-      <div role="table" aria-label="Payments" className="min-w-5xl">
+      <div className="min-w-5xl">
         <div
-          role="row"
           className={classNames(
             COLUMNS,
             'border-b border-border bg-surface-sunken px-5 py-2 text-xs font-medium tracking-wide text-text-subtle uppercase',
@@ -111,7 +110,6 @@ export function PaymentsTable({ payments }: { payments: readonly Payment[] }) {
           {HEADINGS.map((heading) => (
             <span
               key={heading}
-              role="columnheader"
               className={classNames(
                 'border-l-2 border-transparent',
                 (heading === 'Requested' || heading === 'Credited') && 'text-right',
@@ -122,9 +120,13 @@ export function PaymentsTable({ payments }: { payments: readonly Payment[] }) {
           ))}
         </div>
 
-        {payments.map((payment) => (
-          <PaymentRow key={payment.identifier} payment={payment} />
-        ))}
+        <ul aria-label="Payments">
+          {payments.map((payment) => (
+            <li key={payment.identifier}>
+              <PaymentRow payment={payment} />
+            </li>
+          ))}
+        </ul>
       </div>
     </div>
   );

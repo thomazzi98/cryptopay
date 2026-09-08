@@ -59,6 +59,23 @@
   --color-status-canceled: var(--status-canceled);
   --color-status-canceled-soft: var(--status-canceled-soft);
 
+  /**
+   * Infrastructure health and merchant environment get their own tokens.
+   *
+   * They may resolve to the same colours as some status tokens today, and that is not the point. The
+   * status palette is one token per PaymentStatus; borrowing `status-canceled` to mean "live mode"
+   * or `status-completed` to mean "the scanner is healthy" makes the mapping a coincidence, and the
+   * day a status colour is adjusted the unrelated meaning moves with it.
+   */
+  --color-health-ok: var(--health-ok);
+  --color-health-ok-soft: var(--health-ok-soft);
+  --color-health-degraded: var(--health-degraded);
+  --color-health-degraded-soft: var(--health-degraded-soft);
+  --color-health-failed: var(--health-failed);
+  --color-health-failed-soft: var(--health-failed-soft);
+  --color-environment-live: var(--environment-live);
+  --color-environment-live-soft: var(--environment-live-soft);
+
   --color-chart-1: var(--chart-1);
   --color-chart-2: var(--chart-2);
   --color-chart-3: var(--chart-3);
@@ -114,6 +131,15 @@
   --status-canceled: oklch(52% 0.14 18);
   --status-canceled-soft: oklch(95.5% 0.035 18);
 
+  --health-ok: oklch(48% 0.14 156);
+  --health-ok-soft: oklch(95% 0.045 156);
+  --health-degraded: oklch(53% 0.16 42);
+  --health-degraded-soft: oklch(95.5% 0.04 52);
+  --health-failed: oklch(52% 0.14 18);
+  --health-failed-soft: oklch(95.5% 0.035 18);
+  --environment-live: oklch(52% 0.14 18);
+  --environment-live-soft: oklch(95.5% 0.035 18);
+
   --chart-1: oklch(52% 0.19 268);
   --chart-2: oklch(52% 0.16 245);
   --chart-3: oklch(48% 0.14 156);
@@ -157,6 +183,15 @@
     --status-expired-soft: oklch(25% 0.012 264);
     --status-canceled: oklch(74% 0.14 18);
     --status-canceled-soft: oklch(27% 0.06 18);
+
+    --health-ok: oklch(76% 0.15 156);
+    --health-ok-soft: oklch(26% 0.06 156);
+    --health-degraded: oklch(78% 0.14 52);
+    --health-degraded-soft: oklch(28% 0.06 42);
+    --health-failed: oklch(74% 0.14 18);
+    --health-failed-soft: oklch(27% 0.06 18);
+    --environment-live: oklch(74% 0.14 18);
+    --environment-live-soft: oklch(27% 0.06 18);
 
     --chart-1: oklch(72% 0.16 268);
     --chart-2: oklch(76% 0.13 245);
@@ -204,6 +239,15 @@
   --status-expired-soft: oklch(25% 0.012 264);
   --status-canceled: oklch(74% 0.14 18);
   --status-canceled-soft: oklch(27% 0.06 18);
+
+  --health-ok: oklch(76% 0.15 156);
+  --health-ok-soft: oklch(26% 0.06 156);
+  --health-degraded: oklch(78% 0.14 52);
+  --health-degraded-soft: oklch(28% 0.06 42);
+  --health-failed: oklch(74% 0.14 18);
+  --health-failed-soft: oklch(27% 0.06 18);
+  --environment-live: oklch(74% 0.14 18);
+  --environment-live-soft: oklch(27% 0.06 18);
 
   --chart-1: oklch(72% 0.16 268);
   --chart-2: oklch(76% 0.13 245);

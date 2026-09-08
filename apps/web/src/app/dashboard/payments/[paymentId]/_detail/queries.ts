@@ -17,7 +17,7 @@ import { ApiError, callApi } from '@/lib/api-client';
  * instead of widening it, so a panel cannot render a field the endpoint never sends.
  *
  * The contract types a status as a plain string, because the schema is built from a runtime list.
- * It is narrowed once, here, rather than asserted at each of the six places that need a colour.
+ * It is narrowed once, here, rather than asserted at each place that needs a colour.
  */
 
 export type PaymentDeliverySummary = Pick<

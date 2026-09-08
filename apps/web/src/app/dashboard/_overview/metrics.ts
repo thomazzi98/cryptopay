@@ -1,7 +1,13 @@
-import { isPaymentStatus, type Payment, type PaymentStatus } from '@cryptopay/shared';
+import {
+  formatBaseUnits,
+  isPaymentStatus,
+  isTerminalPaymentStatus,
+  type Payment,
+  type PaymentStatus,
+} from '@cryptopay/shared';
 
 import { formatAmount } from '@/lib/format';
-import { describeStatus, STATUS_DISPLAY_ORDER } from '@/lib/payment-status';
+import { STATUS_DISPLAY_ORDER } from '@/lib/payment-status';
 
 /**
  * Every figure on the overview is derived in the browser from one page of payments, because the API
@@ -84,16 +90,6 @@ function baseUnitsDirection(current: bigint, previous: bigint): ChangeDirection 
     return 'down';
   }
   return 'flat';
-}
-
-/** Base units to a decimal string, kept in bigint and string space the whole way. */
-function toDisplay(baseUnits: bigint, decimals: number): string {
-  const digits = baseUnits.toString().padStart(decimals + 1, '0');
-  const whole = digits.slice(0, digits.length - decimals);
-  if (decimals === 0) {
-    return whole;
-  }
-  return `${whole}.${digits.slice(digits.length - decimals)}`;
 }
 
 export function formatSeconds(totalSeconds: number): string {
@@ -183,7 +179,7 @@ function medianSeconds(payments: readonly OverviewPayment[]): number | null {
 }
 
 function completionRate(payments: readonly OverviewPayment[]): number | null {
-  const resolved = payments.filter((payment) => describeStatus(payment.status).isFinal);
+  const resolved = payments.filter((payment) => isTerminalPaymentStatus(payment.status));
   if (resolved.length === 0) {
     return null;
   }
@@ -239,7 +235,7 @@ function buildVolumeKpi(
   return {
     key: 'volume',
     label: 'Volume completed',
-    value: formatAmount(toDisplay(leading.total, leading.decimals)),
+    value: formatAmount(formatBaseUnits(leading.total, leading.decimals)),
     unit: leading.symbol,
     context:
       otherAssets === 0
@@ -248,7 +244,7 @@ function buildVolumeKpi(
     change: comparable
       ? {
           direction: baseUnitsDirection(leading.total, previousTotal),
-          magnitude: `${formatAmount(toDisplay(difference, leading.decimals))} ${leading.symbol}`,
+          magnitude: `${formatAmount(formatBaseUnits(difference, leading.decimals))} ${leading.symbol}`,
         }
       : UNKNOWN_CHANGE,
   };
@@ -361,16 +357,27 @@ export function buildOverview(
   now: number,
 ): OverviewMetrics {
   const payments = withKnownStatus(page);
-  const currentFrom = now - WINDOW_MILLISECONDS;
-  const previousFrom = now - 2 * WINDOW_MILLISECONDS;
-
-  const current = payments.filter((payment) => withinWindow(payment, currentFrom, now + 1));
-  const previous = payments.filter((payment) => withinWindow(payment, previousFrom, currentFrom));
 
   let oldest = Infinity;
+  let newest = -Infinity;
   for (const payment of payments) {
-    oldest = Math.min(oldest, createdAtMilliseconds(payment));
+    const createdAt = createdAtMilliseconds(payment);
+    if (!Number.isFinite(createdAt)) {
+      continue;
+    }
+    oldest = Math.min(oldest, createdAt);
+    newest = Math.max(newest, createdAt);
   }
+
+  const currentFrom = now - WINDOW_MILLISECONDS;
+  const previousFrom = now - 2 * WINDOW_MILLISECONDS;
+  // The clock behind `now` ticks more slowly than the payments poll, so a payment created between
+  // two ticks would sit past the upper bound and go uncounted until the clock caught up.
+  const currentUntil = Math.max(now, newest) + 1;
+
+  const current = payments.filter((payment) => withinWindow(payment, currentFrom, currentUntil));
+  const previous = payments.filter((payment) => withinWindow(payment, previousFrom, currentFrom));
+
   // A truncated page cannot carry a comparison: what it drops is the oldest payments, which is
   // exactly the half the earlier window is made of, so the change would read low every time.
   const comparable = !hasMore || oldest <= previousFrom;

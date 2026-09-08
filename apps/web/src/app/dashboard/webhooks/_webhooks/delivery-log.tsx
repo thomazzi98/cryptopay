@@ -16,6 +16,7 @@ import {
   type DeliveryStatus,
 } from './delivery-presentation';
 import { errorDetail } from './error-detail';
+import { RefreshFailureBanner } from './refresh-failure-banner';
 
 const LIST_POLL_MILLISECONDS = 5000;
 
@@ -74,6 +75,13 @@ export function DeliveryLog() {
       shouldKeepPolling(query.state.data) ? LIST_POLL_MILLISECONDS : false,
   });
 
+  const page = deliveriesQuery.data;
+  const failure = deliveriesQuery.isError ? errorDetail(deliveriesQuery.error) : null;
+
+  function retry(): void {
+    void deliveriesQuery.refetch();
+  }
+
   return (
     <Card>
       <CardHeader
@@ -82,25 +90,21 @@ export function DeliveryLog() {
         action={<StatusFilterControl value={filter} onChange={setFilter} />}
       />
 
-      {deliveriesQuery.isPending && <SkeletonRows rows={6} />}
+      {page !== undefined && failure !== null && (
+        <RefreshFailureBanner detail={failure} onRetry={retry} />
+      )}
 
-      {deliveriesQuery.isError && (
+      {page === undefined && failure === null && <SkeletonRows rows={6} />}
+
+      {page === undefined && failure !== null && (
         <ErrorState
           title="The delivery log could not be loaded"
-          detail={errorDetail(deliveriesQuery.error)}
-          action={
-            <Button
-              onClick={() => {
-                void deliveriesQuery.refetch();
-              }}
-            >
-              Try again
-            </Button>
-          }
+          detail={failure}
+          action={<Button onClick={retry}>Try again</Button>}
         />
       )}
 
-      {deliveriesQuery.isSuccess && deliveriesQuery.data.data.length === 0 && (
+      {page?.data.length === 0 && (
         <EmptyState
           title={filter === 'all' ? 'No callbacks sent yet' : 'No callbacks with this status'}
           description={
@@ -111,9 +115,9 @@ export function DeliveryLog() {
         />
       )}
 
-      {deliveriesQuery.isSuccess && deliveriesQuery.data.data.length > 0 && (
+      {page !== undefined && page.data.length > 0 && (
         <ul>
-          {deliveriesQuery.data.data.map((delivery) => (
+          {page.data.map((delivery) => (
             <DeliveryRow key={delivery.identifier} delivery={delivery} />
           ))}
         </ul>

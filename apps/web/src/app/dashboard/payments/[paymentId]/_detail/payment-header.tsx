@@ -20,14 +20,6 @@ import { useNow } from './use-now';
  * subtract, because that subtraction is the question this screen exists to answer.
  */
 
-const SETTLEMENT_LABELS: Readonly<Record<Payment['settlementStatus'], string>> = Object.freeze({
-  not_started: 'Not started',
-  funding_gas: 'Funding gas',
-  sweeping: 'Sweeping',
-  settled: 'Settled',
-  failed: 'Failed',
-});
-
 function describeDifference(payment: Payment): string {
   const requested = BigInt(payment.requestedAmount.baseUnits);
   const credited = BigInt(payment.creditedAmount.baseUnits);
@@ -157,7 +149,7 @@ export function PaymentHeader({
         <Field label="Expires">
           <span className="tabular text-sm">{formatTimestamp(payment.expiresAt)}</span>
           {now !== null && (
-            <span className="mt-1 block text-xs text-text-subtle">
+            <span className="tabular mt-1 block text-xs text-text-subtle">
               {formatRelative(payment.expiresAt, now)}
             </span>
           )}
@@ -175,13 +167,6 @@ export function PaymentHeader({
           <span className="tabular">{payment.statusVersion}</span>
           <p className="mt-1 text-xs text-text-subtle">
             Discard any webhook that carries a lower one.
-          </p>
-        </Field>
-
-        <Field label="Settlement sweep">
-          <span className="text-sm">{SETTLEMENT_LABELS[payment.settlementStatus]}</span>
-          <p className="mt-1 text-xs text-text-subtle">
-            Moving the funds onward. Independent of the payment status.
           </p>
         </Field>
 

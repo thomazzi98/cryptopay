@@ -11,6 +11,7 @@ import { ErrorState, Skeleton } from '@/components/ui/surfaces';
 import { AllowlistNotice, AttemptOutcomeBadge } from './badges';
 import { errorDetail } from './error-detail';
 import { isAwaitingRetry, type DeliveryStatus } from './delivery-presentation';
+import { RefreshFailureBanner } from './refresh-failure-banner';
 
 const ATTEMPT_POLL_MILLISECONDS = 5000;
 
@@ -46,7 +47,7 @@ function AttemptCard({ attempt }: { attempt: WebhookAttempt }) {
       </dl>
 
       {attempt.failureReason !== null && (
-        <p className="mt-3 text-sm text-status-underpaid">{attempt.failureReason}</p>
+        <p className="mt-3 text-sm text-health-failed">{attempt.failureReason}</p>
       )}
 
       {attempt.responseSnippet !== null && (
@@ -77,40 +78,44 @@ export function DeliveryAttempts({
     refetchInterval: isAwaitingRetry(status) ? ATTEMPT_POLL_MILLISECONDS : false,
   });
 
-  if (detailQuery.isPending) {
-    return (
-      <div className="space-y-2 px-5 py-4">
-        <Skeleton className="h-24 w-full" />
-        <Skeleton className="h-24 w-full" />
-      </div>
-    );
+  const delivery = detailQuery.data;
+  const failure = detailQuery.isError ? errorDetail(detailQuery.error) : null;
+
+  function retry(): void {
+    void detailQuery.refetch();
   }
 
-  if (detailQuery.isError) {
-    return (
-      <ErrorState
-        title="The attempts could not be loaded"
-        detail={errorDetail(detailQuery.error)}
-      />
-    );
+  if (delivery === undefined) {
+    if (failure === null) {
+      return (
+        <div className="space-y-2 px-5 py-4">
+          <Skeleton className="h-24 w-full" />
+          <Skeleton className="h-24 w-full" />
+        </div>
+      );
+    }
+    return <ErrorState title="The attempts could not be loaded" detail={failure} />;
   }
 
-  const attempts = detailQuery.data.attempts;
-  if (attempts.length === 0) {
-    return (
-      <p className="px-5 py-6 text-sm text-text-muted">
-        No attempt has been made yet. This delivery is still queued.
-      </p>
-    );
-  }
-
-  const ordered = attempts.toSorted((first, second) => first.attemptNumber - second.attemptNumber);
+  const ordered = delivery.attempts.toSorted(
+    (first, second) => first.attemptNumber - second.attemptNumber,
+  );
 
   return (
-    <ul className="space-y-2 px-5 py-4">
-      {ordered.map((attempt) => (
-        <AttemptCard key={attempt.attemptNumber} attempt={attempt} />
-      ))}
-    </ul>
+    <div>
+      {failure !== null && <RefreshFailureBanner detail={failure} onRetry={retry} />}
+
+      {ordered.length === 0 ? (
+        <p className="px-5 py-6 text-sm text-text-muted">
+          No attempt has been made yet. This delivery is still queued.
+        </p>
+      ) : (
+        <ul className="space-y-2 px-5 py-4">
+          {ordered.map((attempt) => (
+            <AttemptCard key={attempt.attemptNumber} attempt={attempt} />
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }

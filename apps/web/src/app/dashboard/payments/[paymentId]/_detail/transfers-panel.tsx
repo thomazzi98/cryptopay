@@ -76,11 +76,11 @@ export function TransfersPanel({
     refetchInterval: pollIntervalMilliseconds,
   });
 
-  if (transfersQuery.isPending) {
-    return <SkeletonRows rows={3} />;
-  }
+  const transfers = transfersQuery.data;
 
-  if (transfersQuery.isError) {
+  // A failed refetch keeps the last good rows, so the failure replaces the table only when there is
+  // no table to keep.
+  if (transfers === undefined && transfersQuery.isError) {
     return (
       <ErrorState
         title="The transfers could not be loaded"
@@ -98,7 +98,9 @@ export function TransfersPanel({
     );
   }
 
-  const transfers = transfersQuery.data;
+  if (transfers === undefined) {
+    return <SkeletonRows rows={3} />;
+  }
 
   if (transfers.length === 0) {
     return (

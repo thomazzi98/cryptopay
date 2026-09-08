@@ -73,7 +73,7 @@ export function CancelControl({
       {mutation.error !== null && (
         <p
           role="alert"
-          className="rounded-lg border border-border bg-status-canceled-soft px-3 py-2 text-left text-xs text-status-canceled"
+          className="rounded-lg border border-health-failed bg-health-failed-soft px-3 py-2 text-left text-xs text-health-failed"
         >
           {describeFailure(mutation.error)}
         </p>

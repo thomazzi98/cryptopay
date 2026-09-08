@@ -4,6 +4,7 @@ import { isPaymentStatus, isNetworkIdentifier } from '@cryptopay/shared';
 import { useCallback, useEffect, useState } from 'react';
 
 import { Button } from '@/components/ui/button';
+import { Skeleton } from '@/components/ui/surfaces';
 import { STATUS_DISPLAY_ORDER, describeStatus } from '@/lib/payment-status';
 
 import {
@@ -25,6 +26,8 @@ const SEARCH_DEBOUNCE_MILLISECONDS = 350;
 
 const CONTROL_CLASS =
   'rounded-lg border border-border bg-surface-raised px-2.5 py-2 text-sm text-text transition-colors hover:border-border-strong';
+
+const LABEL_CLASS = 'text-xs font-medium tracking-wide text-text-subtle uppercase';
 
 export function FilterBar({
   filters,
@@ -123,6 +126,37 @@ export function FilterBar({
           Clear filters
         </Button>
       )}
+    </div>
+  );
+}
+
+/**
+ * The bar as it stands before the filters can be read from the URL. It exists so the loading state
+ * has the same first child as the resolved one, and the table below it lands where it was drawn.
+ */
+export function FilterBarSkeleton() {
+  return (
+    <div className="flex flex-wrap items-center gap-2 border-b border-border px-5 py-3">
+      <div className="flex items-center gap-2">
+        <span className={LABEL_CLASS}>Status</span>
+        <div className={CONTROL_CLASS}>
+          <Skeleton className="h-5 w-24" />
+        </div>
+      </div>
+
+      <div className="flex items-center gap-2">
+        <span className={LABEL_CLASS}>Network</span>
+        <div className={CONTROL_CLASS}>
+          <Skeleton className="h-5 w-28" />
+        </div>
+      </div>
+
+      <div className="flex min-w-56 flex-1 items-center gap-2">
+        <span className={LABEL_CLASS}>Reference</span>
+        <div className={`${CONTROL_CLASS} w-full`}>
+          <Skeleton className="h-5 w-full" />
+        </div>
+      </div>
     </div>
   );
 }

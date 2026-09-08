@@ -48,7 +48,6 @@ export const CREATED_PAYMENT_SAMPLE = `HTTP/1.1 201 Created
   "requiredConfirmations": 12,
   "finalityConfirmed": false,
   "settlingBlockHeight": null,
-  "settlementStatus": "not_started",
   "merchantReference": "order-10422",
   "callbackUrl": "https://merchant.example.com/webhooks/cryptopay",
   "metadata": { "orderId": "order-10422" },

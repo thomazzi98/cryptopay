@@ -64,7 +64,7 @@ function ConsoleLine({
 function AttemptDetail({ attempt }: { attempt: WebhookAttempt }) {
   return (
     <>
-      <span className="text-text-muted">attempt {attempt.attemptNumber.toString()}</span>
+      <span className="tabular text-text-muted">attempt {attempt.attemptNumber.toString()}</span>
       <span className={outcomeTone(attempt.outcome)}>{attempt.outcome}</span>
       {attempt.responseStatus !== null && (
         <span className="tabular text-text-muted">HTTP {attempt.responseStatus.toString()}</span>
@@ -142,6 +142,41 @@ function ConsoleEntryLine({ entry }: { entry: ConsoleEntry }) {
   }
 }
 
+interface ReadFailure {
+  readonly source: string;
+  readonly detail: string;
+}
+
+/**
+ * A source that could not be read is named rather than rendered as an absence. An empty section on
+ * this pane reads as "the backend concluded nothing", which is the opposite of what a failed read
+ * means, and this is the screen whose whole purpose is telling those two apart.
+ */
+function ReadFailures({ failures }: { failures: readonly ReadFailure[] }) {
+  if (failures.length === 0) {
+    return null;
+  }
+
+  return (
+    <div
+      role="alert"
+      className="border-b border-health-failed bg-health-failed-soft px-5 py-3 text-xs text-health-failed"
+    >
+      <p className="font-medium">
+        The console below is incomplete. These sources could not be read, so lines they would have
+        contributed are missing rather than absent.
+      </p>
+      <ul className="mt-1 space-y-0.5">
+        {failures.map((failure) => (
+          <li key={failure.source}>
+            {failure.source}: {failure.detail}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 export function VerifyPane({
   identifier,
   payment,
@@ -165,6 +200,15 @@ export function VerifyPane({
 
   const attemptsByDelivery = new Map(
     details.map((detail) => [detail.identifier, detail.attempts] as const),
+  );
+
+  const readFailures = [
+    { source: 'The payment', failure: paymentError },
+    { source: 'The status timeline', failure: timeline.error },
+    { source: 'The observed transfers', failure: transfers.error },
+    { source: 'The callback deliveries', failure: deliveries.error },
+  ].flatMap(({ source, failure }) =>
+    failure === null ? [] : [{ source, detail: readErrorDetail(failure) }],
   );
 
   const entries = buildConsoleEntries({
@@ -197,7 +241,9 @@ export function VerifyPane({
     );
   }
 
-  if (paymentError !== null) {
+  // Only when there is nothing to show. A background refetch that failed still leaves the record of
+  // what the backend concluded, and replacing it with an error page destroys the evidence.
+  if (payment === null && paymentError !== null) {
     return (
       <Card className="lg:col-span-2">
         {header}
@@ -218,6 +264,7 @@ export function VerifyPane({
   return (
     <Card className="lg:col-span-2">
       {header}
+      <ReadFailures failures={readFailures} />
       {entries.length === 0 ? (
         <EmptyState
           title="No events recorded yet"

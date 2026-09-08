@@ -2,6 +2,7 @@ import { Suspense } from 'react';
 
 import { Card } from '@/components/ui/surfaces';
 
+import { FilterBarSkeleton } from './_list/filter-bar';
 import { PaymentsExplorer } from './_list/payments-explorer';
 import { PaymentsTableSkeleton } from './_list/payments-table';
 
@@ -26,6 +27,7 @@ export default function PaymentsPage() {
       <Suspense
         fallback={
           <Card>
+            <FilterBarSkeleton />
             <PaymentsTableSkeleton />
           </Card>
         }

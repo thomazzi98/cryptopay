@@ -3,17 +3,12 @@
 import type { Merchant } from '@cryptopay/shared';
 import { useQuery } from '@tanstack/react-query';
 
-import { Copyable, Field } from '@/components/ui/data';
+import { Amount, Copyable, Field } from '@/components/ui/data';
 import { Card, CardBody, CardHeader, ErrorState, Skeleton } from '@/components/ui/surfaces';
 import { ApiError, callApi } from '@/lib/api-client';
 
 import { EnvironmentSeparation } from './environment-separation';
-import {
-  EXAMPLE_INVOICE_DISPLAY,
-  describeLifetime,
-  formatBasisPoints,
-  workExample,
-} from './settings-arithmetic';
+import { describeLifetime, formatBasisPoints, workExample } from './settings-arithmetic';
 
 /**
  * Everything on this screen is read-only, and deliberately so: GET /v1/merchants/me is the only
@@ -46,17 +41,17 @@ function ToleranceExplanation({ merchant }: { merchant: Merchant }) {
           {merchant.underpaymentToleranceBasisPoints === 0 ? (
             <>
               A payment counts as paid only once the full amount has arrived. On a{' '}
-              <span className="tabular">{example.requested}</span> USDC invoice, anything below{' '}
-              <span className="tabular">{example.minimum}</span> USDC stays partially funded, and
-              settles as underpaid when the window closes.
+              <Amount display={example.requested} symbol="USDC" /> invoice, anything below{' '}
+              <Amount display={example.minimum} symbol="USDC" /> stays partially funded, and settles
+              as underpaid when the window closes.
             </>
           ) : (
             <>
               A payment counts as paid even when it lands short, by up to{' '}
-              <span className="tabular">{example.underpaymentAllowance}</span> USDC on a{' '}
-              <span className="tabular">{example.requested}</span> USDC invoice: anything from{' '}
-              <span className="tabular">{example.minimum}</span> USDC upwards completes, and less
-              than that stays partially funded, then settles as underpaid when the window closes.
+              <Amount display={example.underpaymentAllowance} symbol="USDC" /> on a{' '}
+              <Amount display={example.requested} symbol="USDC" /> invoice: anything from{' '}
+              <Amount display={example.minimum} symbol="USDC" /> upwards completes, and less than
+              that stays partially funded, then settles as underpaid when the window closes.
             </>
           )}
         </p>
@@ -76,16 +71,16 @@ function ToleranceExplanation({ merchant }: { merchant: Merchant }) {
           {merchant.overpaymentToleranceBasisPoints === 0 ? (
             <>
               Any excess at all is reported. On a{' '}
-              <span className="tabular">{example.requested}</span> USDC invoice, more than{' '}
-              <span className="tabular">{example.maximum}</span> USDC settles as overpaid rather
-              than completed, so a surplus is never pocketed quietly.
+              <Amount display={example.requested} symbol="USDC" /> invoice, more than{' '}
+              <Amount display={example.maximum} symbol="USDC" /> settles as overpaid rather than
+              completed, so a surplus is never pocketed quietly.
             </>
           ) : (
             <>
-              An excess of up to <span className="tabular">{example.overpaymentAllowance}</span>{' '}
-              USDC on a <span className="tabular">{example.requested}</span> USDC invoice still
-              settles as completed. Above <span className="tabular">{example.maximum}</span> USDC
-              the payment settles as overpaid instead, so a surplus is never pocketed quietly.
+              An excess of up to <Amount display={example.overpaymentAllowance} symbol="USDC" /> on
+              a <Amount display={example.requested} symbol="USDC" /> invoice still settles as
+              completed. Above <Amount display={example.maximum} symbol="USDC" /> the payment
+              settles as overpaid instead, so a surplus is never pocketed quietly.
             </>
           )}
         </p>
@@ -93,22 +88,30 @@ function ToleranceExplanation({ merchant }: { merchant: Merchant }) {
 
       <div className="sm:col-span-2">
         <p className="text-xs font-medium tracking-wide text-text-subtle uppercase">
-          The accepted band on a {EXAMPLE_INVOICE_DISPLAY} USDC invoice
+          The accepted band on a <Amount display={example.requested} symbol="USDC" /> invoice
         </p>
-        <dl className="mt-2 grid grid-cols-3 gap-2 text-center">
+        <dl className="mt-2 grid grid-cols-1 gap-2 text-center sm:grid-cols-3">
           <div className="rounded-lg border border-border bg-surface-raised p-3">
             <dt className="text-xs text-text-subtle">Minimum accepted</dt>
-            <dd className="tabular mt-1 text-sm font-semibold text-text">{example.minimum} USDC</dd>
+            <dd className="mt-1 text-sm">
+              <Amount display={example.minimum} symbol="USDC" emphasis="strong" />
+            </dd>
           </div>
           <div className="rounded-lg border border-border-strong bg-accent-soft p-3">
             <dt className="text-xs text-text-muted">Requested</dt>
-            <dd className="tabular mt-1 text-sm font-semibold text-accent">
-              {example.requested} USDC
+            <dd className="mt-1 text-sm">
+              <Amount
+                display={example.requested}
+                symbol="USDC"
+                className="font-semibold text-accent"
+              />
             </dd>
           </div>
           <div className="rounded-lg border border-border bg-surface-raised p-3">
             <dt className="text-xs text-text-subtle">Maximum accepted</dt>
-            <dd className="tabular mt-1 text-sm font-semibold text-text">{example.maximum} USDC</dd>
+            <dd className="mt-1 text-sm">
+              <Amount display={example.maximum} symbol="USDC" emphasis="strong" />
+            </dd>
           </div>
         </dl>
       </div>
@@ -169,6 +172,7 @@ export function MerchantSettings() {
   // Pending and failed are both answered above, so the query has resolved and there is no third
   // state to guard against.
   const merchant = query.data;
+  const lifetimeSeconds = merchant.defaultPaymentLifetimeSeconds.toString();
   const lifetime = describeLifetime(merchant.defaultPaymentLifetimeSeconds);
 
   return (
@@ -178,27 +182,29 @@ export function MerchantSettings() {
           title="Merchant"
           description="Who this session is, and which environment its key puts it in."
         />
-        <CardBody className="grid gap-4 sm:grid-cols-3">
-          <Field label="Display name">{merchant.displayName}</Field>
-          <Field label="Merchant identifier">
-            <Copyable value={merchant.identifier} />
-          </Field>
-          <Field label="Environment">
-            <span
-              className={
-                merchant.environment === 'live'
-                  ? 'rounded-full border border-status-canceled bg-status-canceled-soft px-2 py-0.5 text-xs font-medium text-status-canceled'
-                  : 'rounded-full border border-border bg-surface-sunken px-2 py-0.5 text-xs font-medium text-text-muted'
-              }
-            >
-              {merchant.environment === 'live' ? 'Live' : 'Test'}
-            </span>
-            <span className="mt-1 block text-sm text-text-muted">
-              {merchant.environment === 'live'
-                ? 'These payments move real money on Polygon mainnet.'
-                : 'These payments move testnet money only.'}
-            </span>
-          </Field>
+        <CardBody>
+          <dl className="grid gap-4 sm:grid-cols-3">
+            <Field label="Display name">{merchant.displayName}</Field>
+            <Field label="Merchant identifier">
+              <Copyable value={merchant.identifier} />
+            </Field>
+            <Field label="Environment">
+              <span
+                className={
+                  merchant.environment === 'live'
+                    ? 'rounded-full border border-environment-live bg-environment-live-soft px-2 py-0.5 text-xs font-medium text-environment-live'
+                    : 'rounded-full border border-border bg-surface-sunken px-2 py-0.5 text-xs font-medium text-text-muted'
+                }
+              >
+                {merchant.environment === 'live' ? 'Live' : 'Test'}
+              </span>
+              <span className="mt-1 block text-sm text-text-muted">
+                {merchant.environment === 'live'
+                  ? 'These payments move real money on Polygon mainnet.'
+                  : 'These payments move testnet money only.'}
+              </span>
+            </Field>
+          </dl>
         </CardBody>
       </Card>
 
@@ -219,8 +225,8 @@ export function MerchantSettings() {
         />
         <CardBody className="space-y-3">
           <p className="tabular text-lg font-semibold text-text">
-            {merchant.defaultPaymentLifetimeSeconds.toString()} seconds
-            <span className="ml-2 text-sm font-normal text-text-subtle">{lifetime}</span>
+            {lifetimeSeconds} seconds
+            <span className="ml-2 text-sm font-normal text-text-subtle">({lifetime})</span>
           </p>
           <p className="text-sm text-text-muted">
             A payment created without its own window expires {lifetime} after it is created. Money

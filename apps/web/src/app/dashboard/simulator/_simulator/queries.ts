@@ -1,6 +1,7 @@
 'use client';
 
 import type {
+  Merchant,
   Payment,
   PaymentStatusChange,
   PaymentTransfer,
@@ -30,14 +31,6 @@ interface Collection<T> {
   readonly data: T[];
 }
 
-/**
- * TanStack names its loader option `queryFn`, which the naming rule rejects and which no rename can
- * change. The computed key is the narrowest way through it.
- */
-function withLoader<T>(load: (signal: AbortSignal) => Promise<T>) {
-  return { ['queryFn']: ({ signal }: { signal: AbortSignal }) => load(signal) };
-}
-
 function isSettledPayment(payment: Payment | undefined): boolean {
   if (payment === undefined) {
     return false;
@@ -49,10 +42,18 @@ function isSettledDelivery(status: string): boolean {
   return status === 'delivered' || status === 'abandoned';
 }
 
+/** Shares the settings screen's key, so the environment is read once per session. */
+export function useMerchantQuery() {
+  return useQuery({
+    queryKey: ['merchant', 'me'],
+    queryFn: ({ signal }) => callApi<Merchant>('v1/merchants/me', { signal }),
+  });
+}
+
 export function usePaymentQuery(identifier: string | null) {
   return useQuery({
     queryKey: ['simulator', 'payment', identifier],
-    ...withLoader((signal) => callApi<Payment>(`v1/payments/${identifier ?? ''}`, { signal })),
+    queryFn: ({ signal }) => callApi<Payment>(`v1/payments/${identifier ?? ''}`, { signal }),
     enabled: identifier !== null,
     refetchInterval: (query) =>
       isSettledPayment(query.state.data) ? false : LIVE_POLL_MILLISECONDS,
@@ -62,11 +63,10 @@ export function usePaymentQuery(identifier: string | null) {
 export function useTimelineQuery(identifier: string | null, isFinal: boolean) {
   return useQuery({
     queryKey: ['simulator', 'timeline', identifier],
-    ...withLoader((signal) =>
+    queryFn: ({ signal }) =>
       callApi<Collection<PaymentStatusChange>>(`v1/payments/${identifier ?? ''}/timeline`, {
         signal,
       }),
-    ),
     enabled: identifier !== null,
     refetchInterval: isFinal ? false : LIVE_POLL_MILLISECONDS,
   });
@@ -75,9 +75,8 @@ export function useTimelineQuery(identifier: string | null, isFinal: boolean) {
 export function useTransfersQuery(identifier: string | null, isFinal: boolean) {
   return useQuery({
     queryKey: ['simulator', 'transfers', identifier],
-    ...withLoader((signal) =>
+    queryFn: ({ signal }) =>
       callApi<Collection<PaymentTransfer>>(`v1/payments/${identifier ?? ''}/transfers`, { signal }),
-    ),
     enabled: identifier !== null,
     refetchInterval: isFinal ? false : LIVE_POLL_MILLISECONDS,
   });
@@ -91,11 +90,10 @@ export function useTransfersQuery(identifier: string | null, isFinal: boolean) {
 export function useDeliveriesQuery(identifier: string | null) {
   return useQuery({
     queryKey: ['simulator', 'deliveries', identifier],
-    ...withLoader((signal) =>
+    queryFn: ({ signal }) =>
       callApi<Collection<PaymentDelivery>>(`v1/payments/${identifier ?? ''}/deliveries`, {
         signal,
       }),
-    ),
     enabled: identifier !== null,
     refetchInterval: DELIVERY_POLL_MILLISECONDS,
   });
@@ -109,9 +107,8 @@ export function useDeliveryAttempts(deliveries: readonly PaymentDelivery[]): Web
   const results = useQueries({
     queries: deliveries.map((delivery) => ({
       queryKey: ['simulator', 'delivery', delivery.identifier],
-      ...withLoader((signal) =>
+      queryFn: ({ signal }: { signal: AbortSignal }) =>
         callApi<WebhookDelivery>(`v1/webhooks/deliveries/${delivery.identifier}`, { signal }),
-      ),
       refetchInterval: isSettledDelivery(delivery.status) ? false : DELIVERY_POLL_MILLISECONDS,
     })),
   });

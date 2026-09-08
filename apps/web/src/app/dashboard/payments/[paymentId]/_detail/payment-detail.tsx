@@ -43,7 +43,6 @@ import { TransfersPanel } from './transfers-panel';
 const LIVE_POLL_MILLISECONDS = 4000;
 const DEFAULT_TAB: TabId = 'timeline';
 
-/** A terminal payment cannot change again, so the polling stops rather than running all day. */
 function pollIntervalFor(payment: Payment | undefined): number | false {
   if (payment === undefined) {
     return false;
@@ -110,7 +109,7 @@ export function PaymentDetail({ paymentIdentifier }: { paymentIdentifier: string
 
       {paymentQuery.isPending && <DetailSkeleton />}
 
-      {paymentQuery.isError && (
+      {paymentQuery.isError && payment === undefined && (
         <Card>
           <ErrorState
             title="This payment could not be loaded"

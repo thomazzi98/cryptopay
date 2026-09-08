@@ -1,6 +1,6 @@
 'use client';
 
-import { NETWORK_IDENTIFIERS, type CreatePaymentRequest, type Payment } from '@cryptopay/shared';
+import type { CreatePaymentRequest, Merchant, Payment } from '@cryptopay/shared';
 import { useState, type FormEvent } from 'react';
 
 import { Button } from '@/components/ui/button';
@@ -9,6 +9,7 @@ import { Card, CardBody, CardHeader } from '@/components/ui/surfaces';
 import { callApi } from '@/lib/api-client';
 
 import { networkLabel, readErrorDetail } from './presentation';
+import { useMerchantQuery } from './queries';
 
 /**
  * The only pane that writes.
@@ -23,23 +24,40 @@ const FIELD_LABEL = 'text-xs font-medium tracking-wide text-text-subtle uppercas
 const FIELD_CONTROL =
   'mt-1 w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text placeholder:text-text-subtle';
 
-const DEFAULT_NETWORK = NETWORK_IDENTIFIERS[0] ?? 'local-anvil';
+/**
+ * The same split the payments table enforces as a check constraint. Offering a network this key's
+ * environment cannot settle would put a guaranteed database rejection behind the primary button.
+ */
+const NETWORKS_BY_ENVIRONMENT: Readonly<Record<Merchant['environment'], readonly string[]>> =
+  Object.freeze({
+    live: ['polygon-mainnet'],
+    test: ['polygon-amoy', 'local-anvil'],
+  });
 
 export function CreatePane({ onCreated }: { onCreated: (payment: Payment) => void }) {
+  const merchant = useMerchantQuery();
   const [amount, setAmount] = useState('25.00');
-  const [network, setNetwork] = useState<string>(DEFAULT_NETWORK);
+  const [selectedNetwork, setSelectedNetwork] = useState<string | null>(null);
   const [assetSymbol, setAssetSymbol] = useState('USDC');
   const [merchantReference, setMerchantReference] = useState('');
   const [callbackUrl, setCallbackUrl] = useState('');
   const [idempotencyKey, setIdempotencyKey] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
+  const [attemptFailed, setAttemptFailed] = useState(false);
 
-  async function create(key: string): Promise<void> {
+  const environment = merchant.data?.environment ?? null;
+  const networks = environment === null ? [] : NETWORKS_BY_ENVIRONMENT[environment];
+  const network =
+    selectedNetwork !== null && networks.includes(selectedNetwork)
+      ? selectedNetwork
+      : (networks[0] ?? null);
+
+  async function create(key: string, chosenNetwork: string): Promise<void> {
     const trimmedReference = merchantReference.trim();
     const trimmedCallbackUrl = callbackUrl.trim();
     const body: CreatePaymentRequest = {
-      network,
+      network: chosenNetwork,
       assetSymbol: assetSymbol.trim(),
       amount: amount.trim(),
       ...(trimmedReference !== '' && { merchantReference: trimmedReference }),
@@ -52,12 +70,13 @@ export function CreatePane({ onCreated }: { onCreated: (payment: Payment) => voi
       idempotencyKey: key,
     });
     setIdempotencyKey(null);
+    setAttemptFailed(false);
     onCreated(payment);
   }
 
   function submit(event: FormEvent<HTMLFormElement>): void {
     event.preventDefault();
-    if (submitting) {
+    if (submitting || network === null) {
       return;
     }
 
@@ -66,9 +85,10 @@ export function CreatePane({ onCreated }: { onCreated: (payment: Payment) => voi
     setFailure(null);
     setSubmitting(true);
 
-    void create(key)
+    void create(key, network)
       .catch((error: unknown) => {
         setFailure(readErrorDetail(error));
+        setAttemptFailed(true);
       })
       .finally(() => {
         setSubmitting(false);
@@ -113,17 +133,34 @@ export function CreatePane({ onCreated }: { onCreated: (payment: Payment) => voi
               <select
                 id="simulator-network"
                 className={FIELD_CONTROL}
-                value={network}
+                value={network ?? ''}
+                disabled={network === null}
                 onChange={(event) => {
-                  setNetwork(event.target.value);
+                  setSelectedNetwork(event.target.value);
                 }}
               >
-                {NETWORK_IDENTIFIERS.map((identifier) => (
+                {networks.map((identifier) => (
                   <option key={identifier} value={identifier}>
                     {networkLabel(identifier)}
                   </option>
                 ))}
               </select>
+              {environment !== null && (
+                <p className="mt-1 text-xs text-text-subtle">
+                  This key is a {environment} key, so these are the networks it can settle on.
+                </p>
+              )}
+              {merchant.isPending && (
+                <p className="mt-1 text-xs text-text-subtle">
+                  Reading which environment this key belongs to.
+                </p>
+              )}
+              {merchant.error !== null && (
+                <p role="alert" className="mt-1 text-xs text-health-failed">
+                  The networks this key can settle on could not be read.{' '}
+                  {readErrorDetail(merchant.error)}
+                </p>
+              )}
             </div>
 
             <div>
@@ -187,10 +224,15 @@ export function CreatePane({ onCreated }: { onCreated: (payment: Payment) => voi
           )}
 
           <div className="flex items-center justify-between gap-3 pt-1">
-            <Button type="submit" variant="primary" loading={submitting}>
+            <Button
+              type="submit"
+              variant="primary"
+              loading={submitting}
+              disabled={network === null}
+            >
               Create payment
             </Button>
-            {idempotencyKey !== null && (
+            {idempotencyKey !== null && attemptFailed && (
               <span className="flex min-w-0 items-center gap-1 text-xs text-text-subtle">
                 Retrying with
                 <Copyable value={idempotencyKey} />

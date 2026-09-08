@@ -32,10 +32,10 @@ const DELIVERY_POLL_MILLISECONDS = 8000;
 
 const DELIVERY_TONES: Readonly<Record<PaymentDeliverySummary['status'], string>> = Object.freeze({
   pending: 'border-border bg-surface-sunken text-text-muted',
-  in_flight: 'border-status-confirming bg-status-confirming-soft text-status-confirming',
-  delivered: 'border-status-completed bg-status-completed-soft text-status-completed',
-  failed: 'border-status-underpaid bg-status-underpaid-soft text-status-underpaid',
-  abandoned: 'border-status-canceled bg-status-canceled-soft text-status-canceled',
+  in_flight: 'border-accent bg-accent-soft text-accent',
+  delivered: 'border-health-ok bg-health-ok-soft text-health-ok',
+  failed: 'border-health-degraded bg-health-degraded-soft text-health-degraded',
+  abandoned: 'border-health-failed bg-health-failed-soft text-health-failed',
 });
 
 const DELIVERY_LABELS: Readonly<Record<PaymentDeliverySummary['status'], string>> = Object.freeze({
@@ -111,7 +111,7 @@ function DeliveryRow({
       </div>
 
       {delivery.lastFailure !== null && (
-        <p className="mt-3 rounded-lg border border-border bg-surface-sunken px-3 py-2 font-mono text-xs break-all text-status-canceled">
+        <p className="mt-3 rounded-lg border border-border bg-surface-sunken px-3 py-2 font-mono text-xs break-all text-health-failed">
           {delivery.lastFailure}
         </p>
       )}
@@ -119,7 +119,7 @@ function DeliveryRow({
       {mutation.error !== null && (
         <p
           role="alert"
-          className="mt-2 rounded-lg border border-border bg-status-canceled-soft px-3 py-2 text-xs text-status-canceled"
+          className="mt-2 rounded-lg border border-health-failed bg-health-failed-soft px-3 py-2 text-xs text-health-failed"
         >
           {describeFailure(mutation.error)}
         </p>
@@ -138,11 +138,11 @@ export function DeliveriesPanel({ paymentIdentifier }: { paymentIdentifier: stri
     refetchInterval: DELIVERY_POLL_MILLISECONDS,
   });
 
-  if (deliveriesQuery.isPending) {
-    return <SkeletonRows rows={3} />;
-  }
+  const deliveries = deliveriesQuery.data;
 
-  if (deliveriesQuery.isError) {
+  // A failed refetch keeps the last good rows, so the failure replaces the list only when there is
+  // no list to keep.
+  if (deliveries === undefined && deliveriesQuery.isError) {
     return (
       <ErrorState
         title="The deliveries could not be loaded"
@@ -160,7 +160,9 @@ export function DeliveriesPanel({ paymentIdentifier }: { paymentIdentifier: stri
     );
   }
 
-  const deliveries = deliveriesQuery.data;
+  if (deliveries === undefined) {
+    return <SkeletonRows rows={3} />;
+  }
 
   if (deliveries.length === 0) {
     return (

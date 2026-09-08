@@ -11,9 +11,9 @@ import { isHalted, type ComponentStatus, type ReadinessReport } from './readines
  */
 
 const STATUS_STYLES: Readonly<Record<ComponentStatus, string>> = Object.freeze({
-  ok: 'text-status-completed bg-status-completed-soft border-status-completed',
-  degraded: 'text-status-underpaid bg-status-underpaid-soft border-status-underpaid',
-  failed: 'text-status-canceled bg-status-canceled-soft border-status-canceled',
+  ok: 'text-health-ok bg-health-ok-soft border-health-ok',
+  degraded: 'text-health-degraded bg-health-degraded-soft border-health-degraded',
+  failed: 'text-health-failed bg-health-failed-soft border-health-failed',
 });
 
 const STATUS_LABELS: Readonly<Record<ComponentStatus, string>> = Object.freeze({
@@ -58,7 +58,7 @@ export function HealthStrip({ report }: { report: ReadinessReport }) {
         className={classNames(
           'rounded-lg border px-3 py-2 text-xs',
           isRelaxed
-            ? 'border-status-underpaid bg-status-underpaid-soft text-status-underpaid'
+            ? 'border-health-degraded bg-health-degraded-soft text-health-degraded'
             : 'border-border bg-surface-sunken text-text-muted',
         )}
       >
@@ -84,7 +84,7 @@ export function HealthStrip({ report }: { report: ReadinessReport }) {
             <HealthPill status={component.status} label={STATUS_LABELS[component.status]} />
             <span className="font-mono text-xs text-text">{component.name}</span>
             {isHalted(component) && (
-              <span className="rounded-full border border-status-canceled bg-status-canceled-soft px-2 py-0.5 text-xs font-medium text-status-canceled">
+              <span className="rounded-full border border-health-failed bg-health-failed-soft px-2 py-0.5 text-xs font-medium text-health-failed">
                 Scanning halted
               </span>
             )}

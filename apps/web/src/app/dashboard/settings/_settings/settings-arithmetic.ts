@@ -11,9 +11,9 @@ import {
  * cannot drift from the band the ledger actually enforces.
  */
 
-export const EXAMPLE_INVOICE_DISPLAY = '25';
+const EXAMPLE_INVOICE_DISPLAY = '25';
 
-export interface WorkedExample {
+interface WorkedExample {
   readonly requested: string;
   readonly minimum: string;
   readonly maximum: string;

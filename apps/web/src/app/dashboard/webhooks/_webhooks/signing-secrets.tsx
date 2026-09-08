@@ -11,6 +11,7 @@ import { Copyable } from '@/components/ui/data';
 import { Card, CardHeader, EmptyState, ErrorState, SkeletonRows } from '@/components/ui/surfaces';
 
 import { errorDetail } from './error-detail';
+import { RefreshFailureBanner } from './refresh-failure-banner';
 
 /**
  * The secrets card, and the one moment in this dashboard that cannot be repeated.
@@ -28,12 +29,12 @@ function RevealedSecret({ secret, onDismiss }: { secret: string; onDismiss: () =
   return (
     <div
       role="alert"
-      className="mx-5 mt-4 rounded-xl border border-status-underpaid bg-status-underpaid-soft px-4 py-4"
+      className="mx-5 mt-4 rounded-xl border border-health-degraded bg-health-degraded-soft px-4 py-4"
     >
-      <p className="text-sm font-semibold text-status-underpaid">
+      <p className="text-sm font-semibold text-health-degraded">
         Copy this secret now. It will never be shown again.
       </p>
-      <p className="mt-1 text-sm text-status-underpaid">
+      <p className="mt-1 text-sm text-health-degraded">
         This is the only time the API returns the full value. Store it before you leave this page;
         if you lose it, the only recovery is another rotation.
       </p>
@@ -44,7 +45,7 @@ function RevealedSecret({ secret, onDismiss }: { secret: string; onDismiss: () =
         <Button size="small" onClick={onDismiss}>
           I have stored it
         </Button>
-        <span className="text-xs text-status-underpaid">
+        <span className="text-xs text-health-degraded">
           Both secrets sign during the overlap, so an endpoint still using the old one keeps
           verifying until you retire it.
         </span>
@@ -88,7 +89,7 @@ function SecretRow({
         </div>
       </div>
       {failure !== null && (
-        <p role="alert" className="mt-2 text-sm text-status-canceled">
+        <p role="alert" className="mt-2 text-sm text-health-failed">
           {failure}
         </p>
       )}
@@ -130,6 +131,13 @@ export function SigningSecrets() {
     return errorDetail(retire.error);
   }
 
+  const secrets = secretsQuery.data;
+  const loadFailure = secretsQuery.isError ? errorDetail(secretsQuery.error) : null;
+
+  function retry(): void {
+    void secretsQuery.refetch();
+  }
+
   return (
     <Card>
       <CardHeader
@@ -150,7 +158,7 @@ export function SigningSecrets() {
       />
 
       {rotate.isError && (
-        <p role="alert" className="px-5 pt-4 text-sm text-status-canceled">
+        <p role="alert" className="px-5 pt-4 text-sm text-health-failed">
           {errorDetail(rotate.error)}
         </p>
       )}
@@ -164,34 +172,30 @@ export function SigningSecrets() {
         />
       )}
 
-      {secretsQuery.isPending && <SkeletonRows rows={2} />}
+      {secrets !== undefined && loadFailure !== null && (
+        <RefreshFailureBanner detail={loadFailure} onRetry={retry} />
+      )}
 
-      {secretsQuery.isError && (
+      {secrets === undefined && loadFailure === null && <SkeletonRows rows={2} />}
+
+      {secrets === undefined && loadFailure !== null && (
         <ErrorState
           title="The signing secrets could not be loaded"
-          detail={errorDetail(secretsQuery.error)}
-          action={
-            <Button
-              onClick={() => {
-                void secretsQuery.refetch();
-              }}
-            >
-              Try again
-            </Button>
-          }
+          detail={loadFailure}
+          action={<Button onClick={retry}>Try again</Button>}
         />
       )}
 
-      {secretsQuery.isSuccess && secretsQuery.data.data.length === 0 && (
+      {secrets?.data.length === 0 && (
         <EmptyState
           title="No active signing secret"
           description="Callbacks cannot be verified until one exists. Start a rotation to issue the first."
         />
       )}
 
-      {secretsQuery.isSuccess && secretsQuery.data.data.length > 0 && (
+      {secrets !== undefined && secrets.data.length > 0 && (
         <ul className="mt-2">
-          {secretsQuery.data.data.map((secret) => (
+          {secrets.data.map((secret) => (
             <SecretRow
               key={secret.identifier}
               secret={secret}
