@@ -31,6 +31,7 @@ import {
 import type { BlockCursorRepository } from '../infrastructure/persistence/block-cursor.repository.js';
 import type { EvaluationQueueRepository } from '../infrastructure/persistence/evaluation-queue.repository.js';
 import type { PaymentTransferRepository } from '../infrastructure/persistence/payment-transfer.repository.js';
+import type { AuditLogRepository } from '../infrastructure/persistence/audit-log.repository.js';
 import type { RateLimitRepository } from '../infrastructure/persistence/rate-limit.repository.js';
 import type { SettlementRepository } from '../infrastructure/persistence/settlement.repository.js';
 import type { WebhookDeliveryRepository } from '../infrastructure/persistence/webhook-delivery.repository.js';
@@ -62,6 +63,7 @@ export interface ServerDependencies {
   readonly evaluationQueueRepository: EvaluationQueueRepository;
   readonly settlementRepository: SettlementRepository;
   readonly rateLimitRepository: RateLimitRepository;
+  readonly auditLogRepository: AuditLogRepository;
 }
 
 const MAXIMUM_SUPPLIED_REQUEST_ID_LENGTH = 128;
@@ -272,6 +274,7 @@ export function buildServer(dependencies: ServerDependencies): ApplicationServer
     idempotencyRepository: dependencies.idempotencyRepository,
     paymentTransferRepository: dependencies.paymentTransferRepository,
     blockCursorRepository: dependencies.blockCursorRepository,
+    auditLogRepository: dependencies.auditLogRepository,
   });
   registerCheckoutRoutes(server, {
     paymentRepository: dependencies.paymentRepository,

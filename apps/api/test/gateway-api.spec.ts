@@ -634,3 +634,96 @@ describe('what an API key is allowed to do', () => {
     expect(stored.rows[0]?.scopes).toContain('payments:read');
   });
 });
+
+/**
+ * The payment status history records what the system concluded from what a chain showed. It says
+ * nothing about who asked for the payment in the first place, and that is the question an
+ * investigation always starts with.
+ */
+async function auditFor(subjectId: string) {
+  const result = await pool.query<{
+    action: string;
+    api_key_id: string;
+    merchant_id: string;
+    request_id: string;
+    detail: Record<string, unknown>;
+  }>(
+    `SELECT action, api_key_id, merchant_id, request_id, detail
+       FROM audit_log WHERE subject_id = $1 ORDER BY id`,
+    [subjectId],
+  );
+  return result.rows;
+}
+
+describe('the audit trail', () => {
+  it('records which key created a payment, and what it asked for', async () => {
+    const response = await createPayment();
+    const payment = response.json<GatewayPayment>();
+
+    // The write is fired without blocking the response, so give it a moment to land.
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    const entries = await auditFor(payment.id);
+
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.action).toBe('payment.created');
+    expect(entries[0]?.merchant_id).toBe(MERCHANT_ID);
+    expect(entries[0]?.api_key_id).toMatch(/^ak_/);
+    expect(entries[0]?.request_id).toBe(response.headers['x-request-id']);
+    expect(entries[0]?.detail).toMatchObject({
+      network: 'polygon-amoy',
+      currency: 'USDC',
+      externalReference: payment.externalReference,
+    });
+  });
+
+  it('records a cancellation against the same payment', async () => {
+    const createResponse = await createPayment();
+    const created = createResponse.json<GatewayPayment>();
+    await server.inject({
+      method: 'POST',
+      url: `/api/v1/payments/${created.id}/cancel`,
+      headers: { authorization: `Bearer ${testKey}` },
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    const entries = await auditFor(created.id);
+    expect(entries.map((entry) => entry.action)).toEqual(['payment.created', 'payment.cancelled']);
+  });
+
+  /**
+   * An audit row is read by people who are not entitled to the payload it describes, so it carries
+   * request-shaped facts and never a secret or a whole request body. A callback URL alone can carry
+   * a token in it.
+   */
+  it('never records a credential or a whole request body', async () => {
+    const response = await createPayment({
+      body: {
+        externalReference: nextExternalReference(),
+        network: 'polygon',
+        currency: 'USDC',
+        amount: '25.00',
+        callbackUrl: 'https://merchant.example.com/hooks?token=not-a-real-token',
+      },
+    });
+    const created = response.json<GatewayPayment>();
+
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    const entries = await auditFor(created.id);
+    const serialised = JSON.stringify(entries);
+
+    expect(serialised).not.toContain('not-a-real-token');
+    expect(serialised).not.toContain('callbackUrl');
+    expect(serialised).not.toContain(testKey);
+  });
+
+  it('outlives the payment it describes, so a deletion cannot erase the trail', async () => {
+    const createResponse = await createPayment();
+    const created = createResponse.json<GatewayPayment>();
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    await pool.query('DELETE FROM payment_addresses WHERE payment_id = $1', [created.id]);
+    await pool.query('DELETE FROM payments WHERE id = $1', [created.id]);
+
+    const entries = await auditFor(created.id);
+    expect(entries.length).toBeGreaterThan(0);
+  });
+});

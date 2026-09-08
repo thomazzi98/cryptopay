@@ -16,6 +16,10 @@ import type { PaymentRepository } from '../../infrastructure/persistence/payment
 import type { PaymentTransferRepository } from '../../infrastructure/persistence/payment-transfer.repository.js';
 import { MissingWalletSeedError } from '../../infrastructure/wallet/allocator-provider.js';
 import { requireScope, type AuthenticationHook } from '../authentication.js';
+import type {
+  AuditEntry,
+  AuditLogRepository,
+} from '../../infrastructure/persistence/audit-log.repository.js';
 import { GATEWAY_CODES, gatewayError } from '../gateway-error.js';
 import {
   presentGatewayPayment,
@@ -73,6 +77,7 @@ export interface GatewayPaymentRouteDependencies {
   readonly idempotencyRepository: IdempotencyRepository;
   readonly paymentTransferRepository: PaymentTransferRepository;
   readonly blockCursorRepository: BlockCursorRepository;
+  readonly auditLogRepository: AuditLogRepository;
 }
 
 function readIdempotencyKey(headerValue: unknown): string {
@@ -97,6 +102,18 @@ export function registerGatewayPaymentRoutes(
   server: ApplicationServer,
   dependencies: GatewayPaymentRouteDependencies,
 ): void {
+  /**
+   * An audit write must never fail the request that caused it. A trail with a gap is a worse
+   * outcome than a refused payment only in the sense that both are bad; a refused payment is worse.
+   */
+  function audit(request: FastifyRequest, entry: Omit<AuditEntry, 'requestId'>): void {
+    void dependencies.auditLogRepository
+      .record({ ...entry, requestId: request.id })
+      .catch((error: unknown) => {
+        request.log.warn({ event: 'audit.not_recorded', error }, 'an audit entry was not written');
+      });
+  }
+
   /**
    * Whether the scanner has reached this payment yet, which is what separates CREATED from
    * WAITING_FOR_PAYMENT. A cursor that has not been initialised, or one that has halted, both mean
@@ -280,6 +297,19 @@ export function registerGatewayPaymentRoutes(
           throw gatewayError(mapped.status, mapped.code, result.failure.detail);
         }
 
+        audit(request, {
+          merchantId: authenticated.merchantId,
+          apiKeyId: authenticated.apiKeyIdentifier,
+          action: 'payment.created',
+          subjectType: 'payment',
+          subjectId: result.payment.identifier,
+          detail: {
+            network: network.networkIdentifier,
+            currency: token.currency,
+            externalReference: parsed.data.externalReference,
+          },
+        });
+
         await reply
           .code(201)
           .send(presentGatewayPayment(result.payment, [], { monitoringHasReachedCreation: false }));
@@ -358,6 +388,15 @@ export function registerGatewayPaymentRoutes(
           outcome.detail,
         );
       }
+
+      audit(request, {
+        merchantId: authenticated.merchantId,
+        apiKeyId: authenticated.apiKeyIdentifier,
+        action: 'payment.cancelled',
+        subjectType: 'payment',
+        subjectId: outcome.payment.identifier,
+        detail: { alreadyCancelled: outcome.kind === 'already_canceled' },
+      });
 
       await reply.send(await present(outcome.payment));
     },
