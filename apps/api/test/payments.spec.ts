@@ -605,3 +605,68 @@ describe('the integration surface', () => {
     expect(response.statusCode).toBe(401);
   });
 });
+
+/**
+ * The separation a merchant is promised when they hold two keys.
+ *
+ * A merchant legitimately holds both a test and a live key, so "scoped by merchant" is not enough on
+ * its own: without an environment predicate a test key reaches that merchant's own mainnet payments,
+ * and the separation the product is sold on is a convention rather than a control.
+ */
+describe('reading one payment across environments', () => {
+  let livePaymentIdentifier = '';
+
+  beforeAll(async () => {
+    const created = await createPayment({
+      key: liveKey,
+      body: { network: 'polygon-mainnet', assetSymbol: 'USDC', amount: '10.00' },
+    });
+    livePaymentIdentifier = created.json<{ identifier: string }>().identifier;
+  });
+
+  it('refuses a live payment to a test key of the same merchant', async () => {
+    const response = await server.inject({
+      method: 'GET',
+      url: `/v1/payments/${livePaymentIdentifier}`,
+      headers: { authorization: `Bearer ${testKey}` },
+    });
+    expect(response.statusCode).toBe(404);
+  });
+
+  it('refuses to cancel a live payment with a test key', async () => {
+    const response = await server.inject({
+      method: 'POST',
+      url: `/v1/payments/${livePaymentIdentifier}/cancel`,
+      headers: { authorization: `Bearer ${testKey}` },
+    });
+    expect(response.statusCode).toBe(404);
+
+    const stored = await pool.query<{ status: string }>(
+      'SELECT status FROM payments WHERE id = $1',
+      [livePaymentIdentifier],
+    );
+    expect(stored.rows[0]?.status).toBe('pending');
+  });
+
+  it.each(['transfers', 'timeline', 'deliveries'])(
+    'refuses the %s of a live payment to a test key',
+    async (collection) => {
+      const response = await server.inject({
+        method: 'GET',
+        url: `/v1/payments/${livePaymentIdentifier}/${collection}`,
+        headers: { authorization: `Bearer ${testKey}` },
+      });
+      expect(response.statusCode).toBe(404);
+    },
+  );
+
+  it('serves the same payment to the live key it belongs to', async () => {
+    const response = await server.inject({
+      method: 'GET',
+      url: `/v1/payments/${livePaymentIdentifier}`,
+      headers: { authorization: `Bearer ${liveKey}` },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json<{ environment: string }>().environment).toBe('live');
+  });
+});

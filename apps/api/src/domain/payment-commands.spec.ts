@@ -39,7 +39,7 @@ function build(overrides: Partial<Payment> = {}): Payment {
 
 describe('cancelPayment', () => {
   it('cancels a pending payment and advances the version', () => {
-    const decision = cancelPayment(build());
+    const decision = cancelPayment(build(), 0);
     expect(decision.kind).toBe('applied');
     if (decision.kind !== 'applied') {
       return;
@@ -50,7 +50,7 @@ describe('cancelPayment', () => {
   });
 
   it('reports a second cancellation as ignored rather than failed', () => {
-    const decision = cancelPayment(build({ status: 'canceled' }));
+    const decision = cancelPayment(build({ status: 'canceled' }), 0);
     expect(decision.kind).toBe('ignored');
   });
 
@@ -61,7 +61,7 @@ describe('cancelPayment', () => {
   it.each(['partially_funded', 'confirming'] as PaymentStatus[])(
     'refuses to cancel a %s payment',
     (status) => {
-      const decision = cancelPayment(build({ status, creditedAmountInBaseUnits: 10_000_000n }));
+      const decision = cancelPayment(build({ status, creditedAmountInBaseUnits: 10_000_000n }), 0);
       expect(decision.kind).toBe('rejected');
     },
   );
@@ -69,13 +69,31 @@ describe('cancelPayment', () => {
   it.each(['completed', 'overpaid', 'underpaid', 'expired'] as PaymentStatus[])(
     'refuses to cancel a %s payment',
     (status) => {
-      expect(cancelPayment(build({ status })).kind).toBe('rejected');
+      expect(cancelPayment(build({ status }), 0).kind).toBe('rejected');
     },
   );
 
+  /**
+   * The window the status cannot see. A transfer the scanner has recorded leaves the payment
+   * `pending` until the evaluator runs, and cancelling in that gap sends the customer's money to an
+   * address created for one invoice that nothing will look at again.
+   */
+  it('refuses to cancel a pending payment that already has a transfer on chain', () => {
+    const decision = cancelPayment(build(), 1);
+    expect(decision.kind).toBe('rejected');
+    if (decision.kind !== 'rejected') {
+      return;
+    }
+    expect(decision.reason).toContain('already received a transfer');
+  });
+
+  it('still cancels when the only transfers recorded were orphaned by a reorg', () => {
+    expect(cancelPayment(build(), 0).kind).toBe('applied');
+  });
+
   it('leaves the original payment untouched', () => {
     const payment = build();
-    cancelPayment(payment);
+    cancelPayment(payment, 0);
     expect(payment.status).toBe('pending');
     expect(payment.statusVersion).toBe(0);
   });

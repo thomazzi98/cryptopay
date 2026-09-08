@@ -7,13 +7,20 @@ import { CreatePaymentUseCase } from './application/create-payment.use-case.js';
 import { DeliverCallbacksUseCase } from './application/deliver-callbacks.use-case.js';
 import { EvaluatePaymentsUseCase } from './application/evaluate-payments.use-case.js';
 import { ScanNetworkUseCase } from './application/scan-network.use-case.js';
+import { SettlePaymentsUseCase } from './application/settle-payments.use-case.js';
 import { LIVE_RETRY_POLICY, TEST_RETRY_POLICY } from './domain/webhook-retry.js';
 import { sendCallback } from './infrastructure/callbacks/callback-transport.js';
 import { resolveSystemAddresses } from './infrastructure/callbacks/address-resolver.js';
-import { type Configuration, loadConfiguration, rpcUrlsFor } from './configuration.js';
+import {
+  type Configuration,
+  loadConfiguration,
+  rpcUrlsFor,
+  spendCeilingFor,
+} from './configuration.js';
 import { buildServer } from './http/build-server.js';
 import type { ApplicationServer } from './http/server-types.js';
 import { EvmChainGateway } from './infrastructure/chain/evm-chain-gateway.js';
+import { EvmSettlementBroadcaster } from './infrastructure/chain/evm-settlement-broadcaster.js';
 import {
   NETWORK_CONFIGURATIONS,
   registerLocalDevelopmentAsset,
@@ -28,15 +35,18 @@ import { MerchantRepository } from './infrastructure/persistence/merchant.reposi
 import { ObservedBlockRepository } from './infrastructure/persistence/observed-block.repository.js';
 import { PaymentRepository } from './infrastructure/persistence/payment.repository.js';
 import { PaymentTransferRepository } from './infrastructure/persistence/payment-transfer.repository.js';
+import { SettlementRepository } from './infrastructure/persistence/settlement.repository.js';
 import { WalletSeedRepository } from './infrastructure/persistence/wallet-seed.repository.js';
 import { WebhookDeliveryRepository } from './infrastructure/persistence/webhook-delivery.repository.js';
 import { WebhookSecretRepository } from './infrastructure/persistence/webhook-secret.repository.js';
 import { UlidFactory } from './infrastructure/system/ulid.js';
 import { WalletAllocatorProvider } from './infrastructure/wallet/allocator-provider.js';
 import { createKeyWrapperRegistry } from './infrastructure/wallet/key-wrapping.js';
+import { WalletSigningProvider } from './infrastructure/wallet/signing-provider.js';
 import { createLogger, type StructuredLogger } from './observability/logger.js';
 import { CallbackWorker } from './workers/callback-worker.js';
 import { NetworkWorker } from './workers/network-worker.js';
+import { SettlementWorker } from './workers/settlement-worker.js';
 
 /**
  * Explicit construction, in one place, in dependency order.
@@ -47,6 +57,10 @@ import { NetworkWorker } from './workers/network-worker.js';
  */
 
 const CHECKOUT_TOKEN_BYTES = 32;
+
+/** Small on purpose: each settlement in a batch costs several RPC calls and can sign. */
+const SETTLEMENT_BATCH_SIZE = 10;
+const SETTLEMENT_ERROR_BACKOFF_MILLISECONDS = 30_000;
 
 export interface Application {
   readonly configuration: Configuration;
@@ -107,6 +121,7 @@ export function buildApplicationServer(
   });
   const paymentCanceler = new CancelPaymentUseCase({
     paymentRepository,
+    paymentTransferRepository,
     ulidFactory,
     checkoutBaseUrl: configuration.publicCheckoutBaseUrl,
     now: () => new Date(),
@@ -276,6 +291,126 @@ export function composeChainWorker(
       }
       // Identity is asserted before any scanning starts, so an endpoint quietly serving a different
       // chain stops the process rather than producing payments that can never be confirmed.
+      await Promise.all(workers.map((worker) => worker.prepare()));
+      await Promise.all(workers.map((worker) => worker.start()));
+    },
+    stop: async () => {
+      await Promise.all(workers.map((worker) => worker.stop()));
+    },
+  };
+}
+
+/**
+ * The settlement worker, composed separately because it is the only process that can sign.
+ *
+ * It gets its own container and its own database role for the same reason the callback worker does,
+ * and for a stronger one: compromising this process means reaching the seed that controls every
+ * deposit address. Nothing else in the deployment needs that access, so nothing else has it.
+ *
+ * A network appears here only when it has RPC endpoints and settlement is enabled. The treasury
+ * address is resolved once, at composition, so a misconfigured seed fails at startup rather than on
+ * the first payment worth settling.
+ */
+export async function composeSettlementWorker(
+  source: NodeJS.ProcessEnv,
+  holderIdentity: string,
+): Promise<BackgroundWorker> {
+  const configuration = loadConfiguration(source);
+  const logger = createLogger(configuration);
+  const databasePool = createDatabasePool(configuration);
+
+  if (configuration.localAnvilUsdcAddress !== undefined) {
+    registerLocalDevelopmentAsset({
+      reference: configuration.localAnvilUsdcAddress,
+      symbol: 'USDC',
+      decimals: 6,
+    });
+  }
+
+  const walletSeedRepository = new WalletSeedRepository(databasePool);
+  const signingProvider = new WalletSigningProvider(
+    walletSeedRepository,
+    createKeyWrapperRegistry(
+      Buffer.from(configuration.walletKeyEncryptionKey, 'base64'),
+      'local-key-1',
+    ),
+  );
+  const settlementRepository = new SettlementRepository(databasePool);
+  const leaseRepository = new LeaderLeaseRepository(databasePool);
+  const ulidFactory = new UlidFactory();
+
+  const eligible = Object.values(NETWORK_CONFIGURATIONS).filter(
+    (network) => rpcUrlsFor(configuration, network.networkIdentifier).length > 0,
+  );
+
+  const workers = await Promise.all(
+    eligible.map(async (network) => {
+      const rpcUrls = rpcUrlsFor(configuration, network.networkIdentifier);
+      const treasuryAccount = await signingProvider.treasuryAccount(network.environment);
+
+      const broadcaster = new EvmSettlementBroadcaster({
+        networkIdentifier: network.networkIdentifier,
+        chainIdentifier: network.chainIdentifier,
+        displayName: network.displayName,
+        nativeCurrencySymbol: network.nativeCurrency.symbol,
+        nativeCurrencyDecimals: network.nativeCurrency.decimals,
+        rpcUrls,
+        environment: network.environment,
+        signingProvider,
+        treasuryAccount,
+      });
+
+      const gateway = new EvmChainGateway({
+        networkIdentifier: network.networkIdentifier,
+        chainIdentifier: network.chainIdentifier,
+        rpcUrls,
+        supportsFinalityTag: network.requiresFinalityTag,
+      });
+
+      return new SettlementWorker({
+        networkIdentifier: network.networkIdentifier,
+        broadcaster,
+        settler: new SettlePaymentsUseCase({
+          networkIdentifier: network.networkIdentifier,
+          gateway,
+          broadcaster,
+          settlementRepository,
+          ulidFactory,
+          logger,
+          now: () => new Date(),
+          spendCeilingInNativeUnits: spendCeilingFor(configuration, network.networkIdentifier),
+          requiredConfirmations: network.requiredConfirmations,
+          requiresFinalityTag: network.requiresFinalityTag,
+          maximumAttempts: configuration.settlementMaximumAttempts,
+          retryBackoffMilliseconds: configuration.settlementRetryBackoffSeconds * 1000,
+          batchSize: SETTLEMENT_BATCH_SIZE,
+        }),
+        leaseRepository,
+        logger,
+        holderIdentity,
+        options: {
+          leaseSeconds: configuration.scannerLeaseSeconds,
+          pollIntervalMilliseconds: configuration.settlementPollIntervalMilliseconds,
+          errorBackoffMilliseconds: SETTLEMENT_ERROR_BACKOFF_MILLISECONDS,
+        },
+      });
+    }),
+  );
+
+  return {
+    logger,
+    databasePool,
+    start: async () => {
+      if (!configuration.settlementEnabled) {
+        throw new Error(
+          'Settlement is disabled. Set SETTLEMENT_ENABLED=true to let this process sign and broadcast.',
+        );
+      }
+      if (workers.length === 0) {
+        throw new Error(
+          'The settlement worker has no network to settle on. Configure RPC endpoints first.',
+        );
+      }
       await Promise.all(workers.map((worker) => worker.prepare()));
       await Promise.all(workers.map((worker) => worker.start()));
     },

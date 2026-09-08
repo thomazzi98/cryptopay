@@ -1,6 +1,9 @@
+import type { Environment } from '@cryptopay/shared';
+
 import { cancelPayment } from '../domain/payment-commands.js';
 import type { Payment } from '../domain/payment.js';
 import type { PaymentRepository } from '../infrastructure/persistence/payment.repository.js';
+import type { PaymentTransferRepository } from '../infrastructure/persistence/payment-transfer.repository.js';
 import type { UlidFactory } from '../infrastructure/system/ulid.js';
 import { buildOutboxEntry } from './callback-payload.js';
 
@@ -21,6 +24,7 @@ export type CancelPaymentResult =
 
 export interface CancelPaymentDependencies {
   readonly paymentRepository: PaymentRepository;
+  readonly paymentTransferRepository: PaymentTransferRepository;
   readonly ulidFactory: UlidFactory;
   readonly checkoutBaseUrl: string;
   readonly now: () => Date;
@@ -35,17 +39,32 @@ export class CancelPaymentUseCase {
     this.dependencies = dependencies;
   }
 
-  async execute(merchantId: string, paymentId: string): Promise<CancelPaymentResult> {
+  async execute(
+    merchantId: string,
+    environment: Environment,
+    paymentId: string,
+  ): Promise<CancelPaymentResult> {
     // A lost compare-and-swap means someone else moved the payment, so the decision is re-made
     // against what is now true rather than retried blindly. Bounded, because an unbounded retry
     // under contention is a livelock.
     for (let attempt = 0; attempt < MAXIMUM_ATTEMPTS; attempt += 1) {
-      const payment = await this.dependencies.paymentRepository.findById(merchantId, paymentId);
+      const payment = await this.dependencies.paymentRepository.findById(
+        merchantId,
+        environment,
+        paymentId,
+      );
       if (payment === null) {
         return { kind: 'not_found' };
       }
 
-      const decision = cancelPayment(payment);
+      // Read from the ledger rather than inferred from the status. A transfer the scanner has
+      // recorded but the evaluator has not yet acted on leaves the payment `pending`, and cancelling
+      // it there would strand the customer's money at an address created for one invoice.
+      const observed = await this.dependencies.paymentTransferRepository.findByPayment(
+        payment.identifier,
+      );
+      const stillOnChain = observed.filter((transfer) => transfer.observation !== 'orphaned');
+      const decision = cancelPayment(payment, stillOnChain.length);
       if (decision.kind === 'ignored') {
         return { kind: 'already_canceled', payment };
       }

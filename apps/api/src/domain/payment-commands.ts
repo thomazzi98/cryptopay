@@ -21,12 +21,21 @@ function advance(payment: Payment, changes: Partial<Payment>): Payment {
  * customer has already funded would strand the customer's money, so it is refused and the merchant
  * is told what the payment's current status is.
  */
-export function cancelPayment(payment: Payment): PaymentDecision {
+export function cancelPayment(payment: Payment, observedTransferCount: number): PaymentDecision {
   if (payment.status === 'canceled') {
     return ignored('the payment is already canceled');
   }
   if (isFinished(payment)) {
     return rejected(`a ${payment.status} payment cannot be canceled`);
+  }
+
+  // The status alone is not enough. It only moves once the scanner has committed a transfer and the
+  // evaluator has run, so between a customer's broadcast and that moment the payment is still
+  // `pending` and every status check says cancelling is fine. Counting the transfers already
+  // recorded closes most of that window; what it cannot close is the seconds before the scanner sees
+  // the log at all, which is why funds arriving against a finished payment stay recoverable.
+  if (observedTransferCount > 0) {
+    return rejected('this payment has already received a transfer on chain and cannot be canceled');
   }
 
   const result = transition(payment.status, 'canceled', 'MERCHANT_CANCELED');
