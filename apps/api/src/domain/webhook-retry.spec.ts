@@ -120,6 +120,35 @@ describe('an endpoint that asks for time', () => {
     expect(decision.delayInSeconds).toBe(TEST_RETRY_POLICY.delaysInSeconds[3]);
   });
 
+  /**
+   * The header is written by the receiver, so it is an input from outside the system. A merchant who
+   * answers 429 with a Retry-After of a day would otherwise park the delivery past the age ceiling,
+   * where the next tick abandons it: the endpoint would have talked itself out of ever being told.
+   */
+  it('clamps a Retry-After that reaches past the age ceiling', () => {
+    const decision = decideRetry(
+      input({
+        attemptNumber: 1,
+        responseStatus: 429,
+        retryAfterSeconds: 86_400,
+        ageInSeconds: TEST_RETRY_POLICY.maximumAgeInSeconds - 600,
+      }),
+    );
+    expect(decision).toMatchObject({ kind: 'retry', delayInSeconds: 600 });
+  });
+
+  it('still waits the scheduled delay when almost no life is left', () => {
+    const decision = decideRetry(
+      input({
+        attemptNumber: 5,
+        responseStatus: 429,
+        retryAfterSeconds: 86_400,
+        ageInSeconds: TEST_RETRY_POLICY.maximumAgeInSeconds - 1,
+      }),
+    );
+    expect(decision.delayInSeconds).toBe(TEST_RETRY_POLICY.delaysInSeconds[4]);
+  });
+
   it('does not treat a rate limit as a malformed request', () => {
     const decision = decideRetry(
       input({ attemptNumber: TEST_RETRY_POLICY.clientErrorAttemptCeiling, responseStatus: 429 }),

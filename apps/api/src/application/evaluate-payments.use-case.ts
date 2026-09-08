@@ -67,6 +67,7 @@ export class EvaluatePaymentsUseCase {
     await this.dependencies.evaluationQueueRepository.enqueueLivePayments(this.network);
     const claimed = await this.dependencies.evaluationQueueRepository.claim(
       this.dependencies.workerIdentity,
+      this.network,
       this.batchSize,
       this.claimLeaseSeconds,
     );

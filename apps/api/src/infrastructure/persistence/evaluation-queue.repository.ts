@@ -50,23 +50,35 @@ export class EvaluationQueueRepository {
     );
   }
 
+  /**
+   * Claims work for one network only.
+   *
+   * Each worker holds a gateway for a single chain and judges what it claims against that chain's
+   * tip and finalized height. Without this predicate a worker watching Amoy could claim a mainnet
+   * payment and decide its confirmation count from Amoy's head — two numbers with no relationship,
+   * and the payment either completes early or never.
+   */
   async claim(
     workerIdentity: string,
+    networkIdentifier: NetworkIdentifier,
     limit: number,
     leaseSeconds: number,
   ): Promise<readonly string[]> {
     const result = await this.pool.query<{ payment_id: string }>(
-      `UPDATE payment_evaluation_queue
+      `UPDATE payment_evaluation_queue queue
           SET locked_by = $1, locked_until = now() + make_interval(secs => $3)
-        WHERE payment_id IN (
-          SELECT payment_id FROM payment_evaluation_queue
-           WHERE locked_until IS NULL OR locked_until < now()
-           ORDER BY enqueued_at, payment_id
-           FOR UPDATE SKIP LOCKED
+        WHERE queue.payment_id IN (
+          SELECT candidate.payment_id
+            FROM payment_evaluation_queue candidate
+            JOIN payments ON payments.id = candidate.payment_id
+           WHERE (candidate.locked_until IS NULL OR candidate.locked_until < now())
+             AND payments.network_identifier = $4::network_identifier
+           ORDER BY candidate.enqueued_at, candidate.payment_id
+           FOR UPDATE OF candidate SKIP LOCKED
            LIMIT $2
         )
-      RETURNING payment_id`,
-      [workerIdentity, limit, leaseSeconds],
+      RETURNING queue.payment_id`,
+      [workerIdentity, limit, leaseSeconds, networkIdentifier],
     );
     return result.rows.map((row) => row.payment_id);
   }

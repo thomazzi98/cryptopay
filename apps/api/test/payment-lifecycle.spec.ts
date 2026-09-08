@@ -148,6 +148,26 @@ async function insertPayment(
   return id;
 }
 
+/** A live payment on a chain this test's worker does not watch. */
+async function insertForeignNetworkPayment(): Promise<string> {
+  paymentCounter += 1;
+  const id = `pay_01K4QW6ZR2M8X4T7YQ0C3D8${paymentCounter.toString().padStart(3, '0')}`;
+  await pool.query(
+    `INSERT INTO payments (
+       id, merchant_id, environment, network_identifier, checkout_token,
+       asset_reference, asset_symbol, asset_decimals,
+       requested_amount, minimum_acceptable_amount, maximum_acceptable_amount,
+       receiving_account, status, required_confirmations, requires_finality_tag,
+       created_at_block_height, expires_at
+     ) VALUES ($1,$2,'test','polygon-amoy',$1,
+               '0x41e94eb019c0762f9bfcf9fb1e58725bfb0e7582','USDC',6,
+               25000000,25000000,25000000,$3,'pending',5,true,0,
+               $4::timestamptz + make_interval(mins => 30))`,
+    [id, MERCHANT_ID, anvilAccount(43).address.toLowerCase(), currentTime.toISOString()],
+  );
+  return id;
+}
+
 async function placeCursorAtTip(): Promise<void> {
   const tip = await publicClient().getBlock({ blockTag: 'latest' });
   await pool.query(
@@ -500,5 +520,27 @@ describe('two workers evaluating the same payments', () => {
     const row = await readPaymentRow(paymentId);
     expect(await transitionsFor(paymentId)).toEqual(['confirming']);
     expect(row.status_version).toBe(1);
+  });
+});
+
+describe('claiming work from the evaluation queue', () => {
+  /**
+   * A worker holds one gateway and judges everything it claims against that chain's tip. Claiming a
+   * payment from another network would count its confirmations against a head that has nothing to
+   * do with it, so the payment completes early or never completes at all.
+   */
+  it('leaves a payment on another network to the worker that watches it', async () => {
+    const queue = new EvaluationQueueRepository(pool);
+    const localPaymentId = await insertPayment(anvilAccount(42).address.toLowerCase());
+    const foreignPaymentId = await insertForeignNetworkPayment();
+
+    await queue.enqueue(localPaymentId);
+    await queue.enqueue(foreignPaymentId);
+
+    const localClaim = await queue.claim('worker-local', 'local-anvil', 10, 30);
+    expect(localClaim).toEqual([localPaymentId]);
+
+    const foreignClaim = await queue.claim('worker-amoy', 'polygon-amoy', 10, 30);
+    expect(foreignClaim).toEqual([foreignPaymentId]);
   });
 });

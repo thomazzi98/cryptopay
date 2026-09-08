@@ -128,12 +128,16 @@ export function decideRetry(input: RetryInput): RetryDecision {
   const scheduled = input.policy.delaysInSeconds[input.attemptNumber - 1] ?? 0;
   const jittered = Math.round(scheduled * clampJitter(input.jitterFactor));
 
-  // An endpoint that asked for more time gets it. Jitter is not applied on top, because the endpoint
-  // named a specific moment and spreading load matters less than respecting it.
+  // An endpoint that asked for more time gets it, up to the age ceiling and no further. A receiver
+  // naming a Retry-After of a year is not honoured into next year: the schedule already bounds how
+  // long an event may be chased, and a header a stranger controls must not be able to park a
+  // delivery past the point where it would have been abandoned anyway.
   if (status === 429 && input.retryAfterSeconds !== null) {
+    const remainingLife = Math.max(0, input.policy.maximumAgeInSeconds - input.ageInSeconds);
+    const honoured = Math.min(input.retryAfterSeconds, remainingLife);
     return {
       kind: 'retry',
-      delayInSeconds: Math.max(jittered, input.retryAfterSeconds),
+      delayInSeconds: Math.max(jittered, honoured),
       reason: 'the destination asked to be retried later',
     };
   }

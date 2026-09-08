@@ -97,11 +97,9 @@ mainnets, and refuses a key with any balance or nonce. It cannot help anyone who
 
 ## 8. What is not implemented
 
-- **Settlement.** Funds are received and credited but never swept: they stay at the address the
-  payment allocated. The API deliberately reports nothing about settlement, because a field that
-  always answers the same thing would be read as "the sweep has not started yet" rather than "there
-  is no sweep". The database column and the constraint that would make a double spend impossible are
-  in place; the worker that would use them is not.
+- **Refund of a sweep that fails permanently.** Settlement sweeps funds to a payout destination and
+  retries what fails, but a settlement that has exhausted its attempts stays `failed` and waits for
+  a person. There is no automated path that returns the money or picks a different destination.
 - **Refunds.** There is no path to return money to a customer who overpaid or paid late. Both states
   are detected, recorded and surfaced; resolving them is manual.
 - **Multiple merchants per key, teams, roles, or an accounts system.** The dashboard authenticates
@@ -119,3 +117,49 @@ are evidence.
 They are evidence about **this** code under **these** conditions. They say nothing about behaviour
 under sustained production load, against a rate-limited provider, during a multi-hour network
 partition, or with a database that has been running for a year. Nothing here has run for a year.
+
+## 10. Known open findings
+
+A structured security review of this repository produced findings that were then adversarially
+verified; sixty survived. Every finding rated critical is fixed. The ones below are rated high, are
+real, and are **not** fixed. They are listed rather than quietly carried, because a review whose
+output is invisible is worth nothing.
+
+**Availability — a deployment stops, but does not lose or misreport money:**
+
+- `/readyz` reports a stale cursor by comparing it against the lease it holds, so a worker that
+  adopts a lease and then stops scanning reads as healthy.
+- A single configured RPC URL leaves payments in `confirming` when that endpoint goes down: the
+  finality gate requires a second, independent opinion and will not accept the same provider twice.
+- The finality quorum client is not asked to prove its chain identity, so an endpoint misconfigured
+  to another chain contributes an opinion about the wrong ledger rather than being refused.
+- Callback delivery has no per-payment error isolation in the evaluator, and one destination that
+  hangs delays the deliveries queued behind it.
+- `findWatchedAccounts` has no supporting index; it is fast on a small live set and degrades with
+  the total number of payments rather than the live ones.
+
+**Correctness at the edges:**
+
+- A transient DNS failure classifies a callback destination as unreachable and abandons it, where a
+  retry would have succeeded.
+- A callback claim is not fenced and does not use `FOR UPDATE SKIP LOCKED`, so two workers can
+  attempt the same delivery; the receiver's own idempotency key is what prevents a duplicate.
+- A payment that re-enters a status after a reorg emits no second callback, so a merchant told
+  "completed" and then walked back is not told again when it completes a second time.
+- A transfer that is re-mined after being orphaned keeps its earlier `credited` classification
+  rather than being re-derived.
+- There is no reconciliation that re-derives `credited_amount` from the transfer rows, so a bug in
+  the incremental path has no independent check behind it.
+- A callback response body is read in full before being discarded; a hostile endpoint can make that
+  large.
+
+**Operations:**
+
+- No key re-wrap path: rotating `WALLET_KEY_ENCRYPTION_KEY` requires manual work.
+- No seed backup or export procedure is documented beyond the provisioning command.
+- No test asserts that `roles.sql` contains every table, and CI never builds the container images,
+  so a permission or image regression is found at deploy time.
+
+**Medium, and also open:** no security headers on API responses, no rate limiting, the dashboard's
+Overview KPIs are derived from a single hundred-row page rather than an aggregate, `formatAmount`
+truncates rather than rounds in the dashboard, and retiring a secret has no confirmation step.
