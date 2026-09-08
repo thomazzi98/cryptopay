@@ -1,0 +1,19 @@
+# gitleaks runs in CI as a second opinion beside `npm run scan:secrets`, which enforces this
+# project's own patterns. Every default gitleaks rule is kept.
+#
+# The one allowlist below is a literal from the integration guide. gitleaks' generic-api-key rule
+# fires on anything shaped `Key: <high-entropy value>`, and an `Idempotency-Key` header value is a
+# string the merchant invents for one request: it authenticates nothing, grants nothing, and is
+# meaningless to anyone who does not already hold the API key.
+#
+# It is allowlisted as an exact string rather than by path. A path allowlist would silence every
+# future finding in that file, which is how a scanner stops being a scanner.
+
+title = "CryptoPay"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "The documented Idempotency-Key example, which is not a credential"
+regexes = ['''Idempotency-Key: order-10422-attempt-1''']
