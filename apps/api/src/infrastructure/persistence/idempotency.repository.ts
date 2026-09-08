@@ -1,5 +1,6 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 
+import type { Environment } from '@cryptopay/shared';
 import type { Pool, PoolClient } from 'pg';
 
 /**
@@ -21,13 +22,23 @@ import type { Pool, PoolClient } from 'pg';
  */
 
 export type ReservationOutcome =
-  | { readonly kind: 'reserved' }
+  /**
+   * The token proves which attempt holds the reservation. A request whose lock expired while it was
+   * still working loses it to a retry, and finds out when its response write matches no row.
+   */
+  | { readonly kind: 'reserved'; readonly ownerToken: string }
   | { readonly kind: 'replay'; readonly status: number; readonly body: string }
   | { readonly kind: 'in_progress'; readonly retryAfterSeconds: number }
   | { readonly kind: 'fingerprint_mismatch' };
 
 export interface ReservationRequest {
   readonly merchantId: string;
+  /**
+   * Part of the key, not a filter. A merchant holds a test key and a live key, and their own order
+   * number is the obvious idempotency key, so without this the two environments collide on a value
+   * the caller cannot see and cannot avoid.
+   */
+  readonly environment: Environment;
   readonly idempotencyKey: string;
   readonly method: string;
   readonly path: string;
@@ -43,7 +54,13 @@ interface ReservationRow {
   readonly lock_remaining_seconds: number;
 }
 
-const LOCK_SECONDS = 15;
+/**
+ * Long enough to cover a payment creation that has to derive an address and write two tables under
+ * load. The old fifteen seconds was routinely shorter than the request it was protecting, so a
+ * retry could take the lock while the original was still running. The owner token is what makes
+ * that safe; this only makes it rare.
+ */
+const LOCK_SECONDS = 60;
 const RETENTION_HOURS = 24;
 
 /**
@@ -64,18 +81,20 @@ export class IdempotencyRepository {
 
   async reserve(request: ReservationRequest): Promise<ReservationOutcome> {
     const fingerprint = fingerprintRequest(request.method, request.path, request.body);
+    const ownerToken = randomBytes(16).toString('hex');
 
     // A single statement does the whole decision. ON CONFLICT DO UPDATE claims an abandoned
     // reservation whose lock has expired, and its WHERE clause is what stops it claiming a live one.
     const claimed = await this.pool.query<{ claimed: boolean }>(
       `INSERT INTO idempotency_keys
-         (merchant_id, idempotency_key, request_method, request_path, request_fingerprint,
-          state, lock_expires_at, expires_at)
-       VALUES ($1, $2, $3, $4, $5, 'in_progress',
-               now() + make_interval(secs => $6), now() + make_interval(hours => $7))
-       ON CONFLICT (merchant_id, idempotency_key) DO UPDATE
+         (merchant_id, environment, idempotency_key, request_method, request_path,
+          request_fingerprint, state, lock_expires_at, expires_at, owner_token)
+       VALUES ($1, $8::environment_name, $2, $3, $4, $5, 'in_progress',
+               now() + make_interval(secs => $6), now() + make_interval(hours => $7), $9)
+       ON CONFLICT (merchant_id, environment, idempotency_key) DO UPDATE
          SET lock_expires_at = now() + make_interval(secs => $6),
-             request_fingerprint = EXCLUDED.request_fingerprint
+             request_fingerprint = EXCLUDED.request_fingerprint,
+             owner_token = EXCLUDED.owner_token
          WHERE idempotency_keys.state = 'in_progress'
            AND idempotency_keys.lock_expires_at <= now()
            AND idempotency_keys.request_fingerprint = EXCLUDED.request_fingerprint
@@ -88,11 +107,13 @@ export class IdempotencyRepository {
         fingerprint,
         LOCK_SECONDS,
         RETENTION_HOURS,
+        request.environment,
+        ownerToken,
       ],
     );
 
     if (claimed.rows.length > 0) {
-      return { kind: 'reserved' };
+      return { kind: 'reserved', ownerToken };
     }
 
     const existing = await this.pool.query<ReservationRow>(
@@ -101,8 +122,8 @@ export class IdempotencyRepository {
               GREATEST(1, CEIL(EXTRACT(EPOCH FROM (lock_expires_at - now()))))::int
                 AS lock_remaining_seconds
          FROM idempotency_keys
-        WHERE merchant_id = $1 AND idempotency_key = $2`,
-      [request.merchantId, request.idempotencyKey],
+        WHERE merchant_id = $1 AND environment = $3::environment_name AND idempotency_key = $2`,
+      [request.merchantId, request.idempotencyKey, request.environment],
     );
 
     const row = existing.rows[0];
@@ -128,27 +149,39 @@ export class IdempotencyRepository {
   async complete(
     client: PoolClient,
     merchantId: string,
+    environment: Environment,
     idempotencyKey: string,
+    ownerToken: string,
     status: number,
     body: string,
-  ): Promise<void> {
-    await client.query(
+  ): Promise<boolean> {
+    const result = await client.query(
       `UPDATE idempotency_keys
-          SET state = 'completed', response_status = $3, response_body = $4
-        WHERE merchant_id = $1 AND idempotency_key = $2`,
-      [merchantId, idempotencyKey, status, body],
+          SET state = 'completed', response_status = $4, response_body = $5
+        WHERE merchant_id = $1 AND environment = $6::environment_name
+          AND idempotency_key = $2 AND owner_token = $3`,
+      [merchantId, idempotencyKey, ownerToken, status, body, environment],
     );
+    return result.rowCount === 1;
   }
 
   /**
    * Drops a reservation whose request failed, so the caller can retry at once rather than waiting
    * for the lock to expire. A failed request must not make a key unusable.
    */
-  async abandon(merchantId: string, idempotencyKey: string): Promise<void> {
+  async abandon(
+    merchantId: string,
+    environment: Environment,
+    idempotencyKey: string,
+    ownerToken: string,
+  ): Promise<void> {
     await this.pool.query(
+      // Only the holder may abandon. A request that already lost its lock must not delete the
+      // reservation the winner is working under.
       `DELETE FROM idempotency_keys
-        WHERE merchant_id = $1 AND idempotency_key = $2 AND state = 'in_progress'`,
-      [merchantId, idempotencyKey],
+        WHERE merchant_id = $1 AND environment = $4::environment_name
+          AND idempotency_key = $2 AND owner_token = $3 AND state = 'in_progress'`,
+      [merchantId, idempotencyKey, ownerToken, environment],
     );
   }
 

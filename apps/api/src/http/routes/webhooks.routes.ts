@@ -242,6 +242,7 @@ export function registerWebhookRoutes(
       const retired = await dependencies.webhookSecretRepository.retire(
         request.params.secretId,
         authenticated.merchantId,
+        authenticated.environment,
       );
       // Refusing to retire the last one is deliberate: a merchant with no active secret would receive
       // callbacks nobody can verify, which is worse than a stale secret that still works.

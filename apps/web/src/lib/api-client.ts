@@ -47,7 +47,7 @@ async function readProblem(response: Response): Promise<ProblemDetails | null> {
 }
 
 export interface RequestOptions {
-  readonly method?: 'GET' | 'POST' | 'DELETE';
+  readonly method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
   readonly body?: unknown;
   readonly idempotencyKey?: string;
   readonly signal?: AbortSignal;

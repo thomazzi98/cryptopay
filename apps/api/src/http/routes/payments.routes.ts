@@ -44,6 +44,18 @@ export interface PaymentRouteDependencies {
   readonly webhookDeliveryRepository: WebhookDeliveryRepository;
 }
 
+/**
+ * Raised when another request took over this one's reservation mid-flight. It exists to roll the
+ * transaction back: the payment and the address this request wrote are discarded so that one
+ * Idempotency-Key yields one payment, and the caller's retry is served the winner's response.
+ */
+class LostReservationError extends Error {
+  constructor() {
+    super('The idempotency reservation was claimed by another request');
+    this.name = 'LostReservationError';
+  }
+}
+
 const FAILURE_CODES: Readonly<Record<CreatePaymentFailure['reason'], ProblemCode>> = Object.freeze({
   unknown_network: 'validation_failed',
   environment_mismatch: 'validation_failed',
@@ -109,6 +121,7 @@ export function registerPaymentRoutes(
     const rawBody = JSON.stringify(request.body ?? {});
     const reservation = await dependencies.idempotencyRepository.reserve({
       merchantId: authenticated.merchantId,
+      environment: authenticated.environment,
       idempotencyKey,
       method: 'POST',
       path: '/v1/payments',
@@ -139,7 +152,12 @@ export function registerPaymentRoutes(
 
     const merchant = await dependencies.merchantRepository.findById(authenticated.merchantId);
     if (merchant === null) {
-      await dependencies.idempotencyRepository.abandon(authenticated.merchantId, idempotencyKey);
+      await dependencies.idempotencyRepository.abandon(
+        authenticated.merchantId,
+        authenticated.environment,
+        idempotencyKey,
+        reservation.ownerToken,
+      );
       throw new ApplicationError('resource_not_found', 'The merchant no longer exists.');
     }
 
@@ -151,18 +169,32 @@ export function registerPaymentRoutes(
         // Placed inside the payment's transaction so a stored response cannot outlive a rolled back
         // payment, nor a payment exist without the response a retry will be given.
         onPersist: async (client, payment) => {
-          await dependencies.idempotencyRepository.complete(
+          const stillOurs = await dependencies.idempotencyRepository.complete(
             client,
             authenticated.merchantId,
+            authenticated.environment,
             idempotencyKey,
+            reservation.ownerToken,
             201,
             JSON.stringify(presentPayment(payment, context)),
           );
+          // The reservation was taken over while this request was still working, which means another
+          // request is creating a payment for the same key. Throwing here rolls back the payment and
+          // the address this request had already written, so the key yields one payment rather than
+          // two. The caller retries and is served the winner's response.
+          if (!stillOurs) {
+            throw new LostReservationError();
+          }
         },
       });
 
       if (result.kind === 'failed') {
-        await dependencies.idempotencyRepository.abandon(authenticated.merchantId, idempotencyKey);
+        await dependencies.idempotencyRepository.abandon(
+          authenticated.merchantId,
+          authenticated.environment,
+          idempotencyKey,
+          reservation.ownerToken,
+        );
         throw new ApplicationError(FAILURE_CODES[result.failure.reason], result.failure.detail);
       }
 
@@ -171,7 +203,12 @@ export function registerPaymentRoutes(
       if (error instanceof ApplicationError) {
         throw error;
       }
-      await dependencies.idempotencyRepository.abandon(authenticated.merchantId, idempotencyKey);
+      await dependencies.idempotencyRepository.abandon(
+        authenticated.merchantId,
+        authenticated.environment,
+        idempotencyKey,
+        reservation.ownerToken,
+      );
 
       if (error instanceof MissingWalletSeedError) {
         request.log.error(

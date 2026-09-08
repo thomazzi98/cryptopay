@@ -517,3 +517,44 @@ describe('signing secrets', () => {
     expect(response.statusCode).toBe(422);
   });
 });
+
+/**
+ * A merchant holds keys for both environments, so "belongs to this merchant" is not a sufficient
+ * check for a destructive action. Retiring the secret a live receiver verifies with breaks live
+ * callback verification, and it did so from a request made with a test key.
+ */
+describe('retiring a signing secret across environments', () => {
+  it('refuses a live secret to a test key', async () => {
+    const liveKey = await issueKey(MERCHANT_ID, 'live');
+    const liveSecret = 'whs_01K4QW6ZR2M8X4T7YQ0C3E2001';
+    const spare = 'whs_01K4QW6ZR2M8X4T7YQ0C3E2002';
+    for (const identifier of [liveSecret, spare]) {
+      await pool.query(
+        `INSERT INTO webhook_secrets (id, merchant_id, environment, secret)
+         VALUES ($1, $2, 'live', $3)`,
+        [identifier, MERCHANT_ID, `${SECRET_PREFIX}${identifier}`],
+      );
+    }
+
+    const refused = await server.inject({
+      method: 'DELETE',
+      url: `/v1/webhooks/secrets/${liveSecret}`,
+      headers: { authorization: `Bearer ${testKey}` },
+    });
+    expect(refused.statusCode).toBe(422);
+
+    const stored = await pool.query<{ retired_at: Date | null }>(
+      'SELECT retired_at FROM webhook_secrets WHERE id = $1',
+      [liveSecret],
+    );
+    expect(stored.rows[0]?.retired_at).toBeNull();
+
+    // The live key that owns it can still retire it, so the guard scopes rather than forbids.
+    const allowed = await server.inject({
+      method: 'DELETE',
+      url: `/v1/webhooks/secrets/${liveSecret}`,
+      headers: { authorization: `Bearer ${liveKey}` },
+    });
+    expect(allowed.statusCode).toBe(204);
+  });
+});

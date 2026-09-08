@@ -67,12 +67,16 @@ export class WebhookSecretRepository {
    * Ends a rotation. Refuses to retire the last active secret, because a merchant with none would
    * receive callbacks nobody can verify, which is worse than a stale secret still working.
    */
-  async retire(identifier: string, merchantId: string): Promise<boolean> {
+  async retire(identifier: string, merchantId: string, environment: Environment): Promise<boolean> {
     const result = await this.pool.query(
+      // Scoped by environment as well as by merchant. A merchant holds keys for both, and without
+      // this a test key could retire the secret their live receiver verifies with — which breaks
+      // live callback verification silently, from a request that looked harmless.
       `UPDATE webhook_secrets target
           SET retired_at = now()
         WHERE target.id = $1
           AND target.merchant_id = $2
+          AND target.environment = $3::environment_name
           AND target.retired_at IS NULL
           AND EXISTS (
             SELECT 1 FROM webhook_secrets sibling
@@ -81,7 +85,7 @@ export class WebhookSecretRepository {
                AND sibling.retired_at IS NULL
                AND sibling.id <> target.id
           )`,
-      [identifier, merchantId],
+      [identifier, merchantId, environment],
     );
     return (result.rowCount ?? 0) > 0;
   }

@@ -109,14 +109,14 @@ function insertSeedFor(id: string, environment: string) {
   );
 }
 
-function reserveIdempotencyKey(key: string) {
+function reserveIdempotencyKey(key: string, environment = 'test') {
   return pool.query(
     `INSERT INTO idempotency_keys
-       (merchant_id, idempotency_key, request_method, request_path, request_fingerprint,
-        state, lock_expires_at, expires_at)
-     VALUES ($1,$2,'POST','/v1/payments',$3,'in_progress',
-             now() + interval '10 seconds', now() + interval '24 hours')`,
-    [MERCHANT_ID, key, Buffer.alloc(32, 9)],
+       (merchant_id, environment, idempotency_key, request_method, request_path,
+        request_fingerprint, state, lock_expires_at, expires_at, owner_token)
+     VALUES ($1,$4::environment_name,$2,'POST','/v1/payments',$3,'in_progress',
+             now() + interval '10 seconds', now() + interval '24 hours', 'owner-token-fixture')`,
+    [MERCHANT_ID, key, Buffer.alloc(32, 9), environment],
   );
 }
 
@@ -505,10 +505,10 @@ describe('idempotency records', () => {
     await expectViolation(
       pool.query(
         `INSERT INTO idempotency_keys
-           (merchant_id, idempotency_key, request_method, request_path, request_fingerprint,
-            state, lock_expires_at, expires_at)
-         VALUES ($1,'key-2','POST','/v1/payments',$2,'completed',
-                 now(), now() + interval '24 hours')`,
+           (merchant_id, environment, idempotency_key, request_method, request_path,
+            request_fingerprint, state, lock_expires_at, expires_at, owner_token)
+         VALUES ($1,'test','key-2','POST','/v1/payments',$2,'completed',
+                 now(), now() + interval '24 hours', 'owner-token-fixture')`,
         [MERCHANT_ID, Buffer.alloc(32, 9)],
       ),
       CHECK_VIOLATION,
@@ -519,10 +519,10 @@ describe('idempotency records', () => {
     await expectViolation(
       pool.query(
         `INSERT INTO idempotency_keys
-           (merchant_id, idempotency_key, request_method, request_path, request_fingerprint,
-            state, lock_expires_at, expires_at)
-         VALUES ($1,'key-3','POST','/v1/payments',$2,'in_progress',
-                 now(), now() + interval '24 hours')`,
+           (merchant_id, environment, idempotency_key, request_method, request_path,
+            request_fingerprint, state, lock_expires_at, expires_at, owner_token)
+         VALUES ($1,'test','key-3','POST','/v1/payments',$2,'in_progress',
+                 now(), now() + interval '24 hours', 'owner-token-fixture')`,
         [MERCHANT_ID, Buffer.alloc(8, 9)],
       ),
       CHECK_VIOLATION,

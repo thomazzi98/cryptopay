@@ -19,7 +19,7 @@ import { readSession } from '@/lib/session';
  */
 
 const API_BASE_URL = process.env.CRYPTOPAY_API_URL ?? 'http://127.0.0.1:3001';
-const FORWARDED_METHODS = new Set(['GET', 'POST', 'DELETE']);
+const FORWARDED_METHODS = new Set(['GET', 'POST', 'PUT', 'DELETE']);
 
 /**
  * Paths the dashboard is allowed to reach, as patterns rather than prefixes. A prefix check would
@@ -30,7 +30,11 @@ const ALLOWED_PATHS: readonly RegExp[] = Object.freeze([
   /^v1\/networks$/,
   /^v1\/payments$/,
   /^v1\/payments\/pay_[\dA-HJKMNP-TV-Z]{26}$/,
-  /^v1\/payments\/pay_[\dA-HJKMNP-TV-Z]{26}\/(transfers|timeline|deliveries|cancel)$/,
+  /^v1\/payments\/pay_[\dA-HJKMNP-TV-Z]{26}\/(transfers|timeline|deliveries|cancel|settlement)$/,
+  /^v1\/settlements$/,
+  /^v1\/treasury$/,
+  /^v1\/payout-destinations$/,
+  /^v1\/payout-destinations\/[a-z][a-z0-9-]{2,31}$/,
   /^v1\/webhooks\/deliveries$/,
   /^v1\/webhooks\/deliveries\/whd_[\dA-HJKMNP-TV-Z]{26}$/,
   /^v1\/webhooks\/deliveries\/whd_[\dA-HJKMNP-TV-Z]{26}\/redeliver$/,
