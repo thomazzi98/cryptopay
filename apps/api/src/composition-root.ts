@@ -26,6 +26,7 @@ import {
   registerLocalDevelopmentAsset,
   requireEvmChainId,
 } from './infrastructure/chain/network-configuration.js';
+import { TOKEN_REGISTRY, validateTokenRegistry } from './infrastructure/chain/token-registry.js';
 import { BlockCursorRepository } from './infrastructure/persistence/block-cursor.repository.js';
 import { ChainScanStore } from './infrastructure/persistence/chain-scan.store.js';
 import { createDatabasePool } from './infrastructure/persistence/database.js';
@@ -84,11 +85,30 @@ export function composeApplication(source: NodeJS.ProcessEnv): Application {
   };
 }
 
+/**
+ * Every process that can quote a payment checks the registry before it does anything else. A
+ * currency resolving to the wrong decimals or to an address on another chain is not an error that
+ * shows up in a log; it is a customer paying the wrong amount to a place nobody is watching. The
+ * cheapest moment to find that is before the process listens.
+ */
+function assertTokenRegistryIsSound(): void {
+  const shapes = Object.values(NETWORK_CONFIGURATIONS).map((network) => ({
+    networkIdentifier: network.networkIdentifier,
+    addressForm: network.addressForm,
+    nativeCurrency: network.nativeCurrency,
+    supportsNativePayments: network.capabilities.supportsNativePayments,
+    supportsTokenPayments: network.capabilities.supportsTokenPayments,
+  }));
+  validateTokenRegistry(shapes, TOKEN_REGISTRY);
+}
+
 export function buildApplicationServer(
   configuration: Configuration,
   logger: ReturnType<typeof createLogger>,
   databasePool: Pool,
 ): ApplicationServer {
+  assertTokenRegistryIsSound();
+
   const merchantRepository = new MerchantRepository(databasePool);
   const paymentRepository = new PaymentRepository(databasePool);
   const idempotencyRepository = new IdempotencyRepository(databasePool);

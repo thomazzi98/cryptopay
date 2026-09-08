@@ -1,3 +1,4 @@
+import { TOKEN_REGISTRY } from './token-registry.js';
 import {
   LOCAL_ANVIL_CHAIN_IDENTIFIER,
   POLYGON_AMOY_CHAIN_IDENTIFIER,
@@ -7,9 +8,6 @@ import {
   POLYGON_NATIVE_CURRENCY_DECIMALS,
   POLYGON_NATIVE_CURRENCY_SYMBOL,
   USDC_BRIDGED_POLYGON_MAINNET_ADDRESS,
-  USDC_DECIMALS,
-  USDC_POLYGON_AMOY_ADDRESS,
-  USDC_POLYGON_MAINNET_ADDRESS,
   type AddressForm,
   type ReferenceForm,
   type Environment,
@@ -69,6 +67,26 @@ export interface NetworkConfiguration {
   readonly explorerBaseUrl: string;
 }
 
+/**
+ * The allowlist is derived from the token registry rather than repeated beside it. Two lists of the
+ * same tokens is two lists that can disagree, and the way they disagree is that a currency the API
+ * happily quotes is one the scanner never watches, so the customer pays and nothing is ever
+ * credited.
+ */
+function allowlistFrom(network: NetworkIdentifier): readonly AllowedAsset[] {
+  return Object.freeze(
+    TOKEN_REGISTRY[network]
+      .filter((token) => token.kind === 'token')
+      .map((token) =>
+        Object.freeze({
+          reference: token.reference,
+          symbol: token.currency,
+          decimals: token.decimals,
+        }),
+      ),
+  );
+}
+
 export const NETWORK_CONFIGURATIONS: Readonly<Record<NetworkIdentifier, NetworkConfiguration>> =
   Object.freeze({
     'polygon-mainnet': Object.freeze({
@@ -99,9 +117,7 @@ export const NETWORK_CONFIGURATIONS: Readonly<Record<NetworkIdentifier, NetworkC
       requiredConfirmations: 12,
       requiresFinalityTag: true,
       maximumReorgDepth: 64,
-      assetAllowlist: Object.freeze([
-        { reference: USDC_POLYGON_MAINNET_ADDRESS, symbol: 'USDC', decimals: USDC_DECIMALS },
-      ]),
+      assetAllowlist: allowlistFrom('polygon-mainnet'),
       // Bridged USDC.e reports the byte-identical symbol "USDC". It is named here so that a transfer
       // of it is recorded as the wrong asset rather than credited.
       assetDenylist: Object.freeze([
@@ -140,9 +156,7 @@ export const NETWORK_CONFIGURATIONS: Readonly<Record<NetworkIdentifier, NetworkC
       requiredConfirmations: 5,
       requiresFinalityTag: true,
       maximumReorgDepth: 32,
-      assetAllowlist: Object.freeze([
-        { reference: USDC_POLYGON_AMOY_ADDRESS, symbol: 'USDC', decimals: USDC_DECIMALS },
-      ]),
+      assetAllowlist: allowlistFrom('polygon-amoy'),
       assetDenylist: Object.freeze([]),
       explorerBaseUrl: POLYGON_AMOY_EXPLORER_BASE_URL,
     }),
@@ -173,7 +187,7 @@ export const NETWORK_CONFIGURATIONS: Readonly<Record<NetworkIdentifier, NetworkC
       maximumReorgDepth: 8,
       // Empty by construction. A development chain deploys a fresh token on every start, so its
       // address is registered at boot through registerLocalDevelopmentAsset rather than frozen here.
-      assetAllowlist: Object.freeze([]),
+      assetAllowlist: allowlistFrom('local-anvil'),
       assetDenylist: Object.freeze([]),
       explorerBaseUrl: '',
     }),
