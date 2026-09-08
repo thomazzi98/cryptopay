@@ -157,6 +157,15 @@ const ABBREVIATION_REPLACEMENTS = {
 };
 
 // Acronyms and ecosystem-fixed names that are clearer short than expanded.
+/**
+ * Property names a library defines, which this codebase does not get to choose.
+ *
+ * Renaming `queryFn` does not rename it in TanStack Query; it produces an object the library ignores.
+ * The mandate is about identifiers someone here picked, and these are not those. Kept as an explicit
+ * short list rather than a pattern, so a genuinely abbreviated name of our own still fails.
+ */
+const LIBRARY_PROPERTY_NAMES = ['queryFn', 'mutationFn', 'gcTime', 'refetchInterval'];
+
 const ALLOWED_SHORT_NAMES = [
   'id',
   'url',
@@ -262,7 +271,9 @@ export default typescriptEslint.config(
           checkShorthandProperties: true,
           extendDefaultReplacements: true,
           replacements: ABBREVIATION_REPLACEMENTS,
-          allowList: Object.fromEntries(ALLOWED_SHORT_NAMES.map((name) => [name, true])),
+          allowList: Object.fromEntries(
+            [...ALLOWED_SHORT_NAMES, ...LIBRARY_PROPERTY_NAMES].map((name) => [name, true]),
+          ),
         },
       ],
 
@@ -356,6 +367,16 @@ export default typescriptEslint.config(
         { allowNumber: true, allowBoolean: false, allowNullish: false },
       ],
     },
+  },
+
+  /**
+   * The App Router derives route parameters from directory names, so `[paymentId]` is the name of an
+   * API rather than a filename someone chose. Renaming it to kebab case would make every read of it
+   * `params['payment-id']`, which is worse in exchange for nothing.
+   */
+  {
+    files: ['apps/web/src/app/**/*.{ts,tsx}'],
+    rules: { 'unicorn/filename-case': 'off' },
   },
 
   // The domain layer is pure: it may reach for node builtins and packages/shared, nothing else.

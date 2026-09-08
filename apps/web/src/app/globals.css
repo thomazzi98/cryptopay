@@ -1,0 +1,290 @@
+@import 'tailwindcss';
+
+/**
+ * Classes referenced from packages/shared must be scanned too. Without this the production build
+ * purges them and nothing else does: the development server compiles on demand and looks correct,
+ * so the failure only ever appears in the deployed bundle.
+ */
+@source "../../../../packages/shared/src";
+
+/**
+ * The design language, as tokens.
+ *
+ * Two rules hold everything together. First, the status palette is mapped one to one onto
+ * PaymentStatus, and the same token drives the badge, the chart series, the row accent and the
+ * timeline dot; a payment can therefore never look completed in one place and confirming in another.
+ * Second, colour never carries meaning alone: every status pairs its colour with a glyph, because a
+ * red and a green pill are the same pill to a colour-blind reader.
+ */
+@theme inline {
+  --font-sans:
+    'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
+    sans-serif;
+  --font-mono:
+    'JetBrains Mono', ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono',
+    monospace;
+
+  --color-surface: var(--surface);
+  --color-surface-raised: var(--surface-raised);
+  --color-surface-sunken: var(--surface-sunken);
+  --color-surface-hover: var(--surface-hover);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+
+  --color-text: var(--text);
+  --color-text-muted: var(--text-muted);
+  --color-text-subtle: var(--text-subtle);
+  --color-text-inverted: var(--text-inverted);
+
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-soft: var(--accent-soft);
+  --color-focus: var(--focus);
+
+  /* One token per PaymentStatus, plus the pair each badge needs. */
+  --color-status-pending: var(--status-pending);
+  --color-status-pending-soft: var(--status-pending-soft);
+  --color-status-partially-funded: var(--status-partially-funded);
+  --color-status-partially-funded-soft: var(--status-partially-funded-soft);
+  --color-status-confirming: var(--status-confirming);
+  --color-status-confirming-soft: var(--status-confirming-soft);
+  --color-status-completed: var(--status-completed);
+  --color-status-completed-soft: var(--status-completed-soft);
+  --color-status-overpaid: var(--status-overpaid);
+  --color-status-overpaid-soft: var(--status-overpaid-soft);
+  --color-status-underpaid: var(--status-underpaid);
+  --color-status-underpaid-soft: var(--status-underpaid-soft);
+  --color-status-expired: var(--status-expired);
+  --color-status-expired-soft: var(--status-expired-soft);
+  --color-status-canceled: var(--status-canceled);
+  --color-status-canceled-soft: var(--status-canceled-soft);
+
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+
+  --radius-card: 0.75rem;
+  --radius-control: 0.5rem;
+  --radius-pill: 9999px;
+
+  /* Elevation is a hairline border plus one soft shadow. No gradients on a data surface. */
+  --shadow-raised: 0 1px 2px 0 rgb(15 23 42 / 0.04), 0 1px 3px 0 rgb(15 23 42 / 0.06);
+  --shadow-overlay: 0 8px 24px -4px rgb(15 23 42 / 0.12), 0 2px 6px -2px rgb(15 23 42 / 0.08);
+}
+
+/**
+ * The light palette is defined on bare `:root` so it is the fallback in every context, including a
+ * viewer whose theme cannot be determined. The dark blocks then redefine only what changes.
+ */
+:root {
+  color-scheme: light;
+
+  --surface: oklch(99% 0.002 260);
+  --surface-raised: oklch(100% 0 0);
+  --surface-sunken: oklch(96.8% 0.004 260);
+  --surface-hover: oklch(97.4% 0.004 260);
+  --border: oklch(91% 0.006 260);
+  --border-strong: oklch(84% 0.008 260);
+
+  --text: oklch(23% 0.015 264);
+  --text-muted: oklch(48% 0.014 264);
+  --text-subtle: oklch(62% 0.012 264);
+  --text-inverted: oklch(99% 0.002 260);
+
+  --accent: oklch(52% 0.19 268);
+  --accent-hover: oklch(46% 0.2 268);
+  --accent-soft: oklch(95% 0.03 268);
+  --focus: oklch(62% 0.19 268);
+
+  --status-pending: oklch(50% 0.02 264);
+  --status-pending-soft: oklch(95.5% 0.006 264);
+  --status-partially-funded: oklch(54% 0.14 62);
+  --status-partially-funded-soft: oklch(95.5% 0.04 78);
+  --status-confirming: oklch(52% 0.16 245);
+  --status-confirming-soft: oklch(95.5% 0.035 245);
+  --status-completed: oklch(48% 0.14 156);
+  --status-completed-soft: oklch(95% 0.045 156);
+  --status-overpaid: oklch(50% 0.13 196);
+  --status-overpaid-soft: oklch(95% 0.04 196);
+  --status-underpaid: oklch(53% 0.16 42);
+  --status-underpaid-soft: oklch(95.5% 0.04 52);
+  --status-expired: oklch(52% 0.02 264);
+  --status-expired-soft: oklch(95.5% 0.006 264);
+  --status-canceled: oklch(52% 0.14 18);
+  --status-canceled-soft: oklch(95.5% 0.035 18);
+
+  --chart-1: oklch(52% 0.19 268);
+  --chart-2: oklch(52% 0.16 245);
+  --chart-3: oklch(48% 0.14 156);
+  --chart-4: oklch(54% 0.14 62);
+}
+
+:root:not([data-theme='light']) {
+  @media (prefers-color-scheme: dark) {
+    color-scheme: dark;
+
+    --surface: oklch(17% 0.012 264);
+    --surface-raised: oklch(20.5% 0.013 264);
+    --surface-sunken: oklch(14.5% 0.011 264);
+    --surface-hover: oklch(24% 0.014 264);
+    --border: oklch(28% 0.014 264);
+    --border-strong: oklch(36% 0.016 264);
+
+    --text: oklch(96% 0.004 264);
+    --text-muted: oklch(74% 0.012 264);
+    --text-subtle: oklch(58% 0.013 264);
+    --text-inverted: oklch(17% 0.012 264);
+
+    --accent: oklch(72% 0.16 268);
+    --accent-hover: oklch(78% 0.15 268);
+    --accent-soft: oklch(28% 0.06 268);
+    --focus: oklch(72% 0.16 268);
+
+    --status-pending: oklch(72% 0.02 264);
+    --status-pending-soft: oklch(26% 0.012 264);
+    --status-partially-funded: oklch(80% 0.13 78);
+    --status-partially-funded-soft: oklch(29% 0.05 62);
+    --status-confirming: oklch(76% 0.13 245);
+    --status-confirming-soft: oklch(27% 0.06 245);
+    --status-completed: oklch(76% 0.15 156);
+    --status-completed-soft: oklch(26% 0.06 156);
+    --status-overpaid: oklch(78% 0.12 196);
+    --status-overpaid-soft: oklch(26% 0.05 196);
+    --status-underpaid: oklch(78% 0.14 52);
+    --status-underpaid-soft: oklch(28% 0.06 42);
+    --status-expired: oklch(66% 0.018 264);
+    --status-expired-soft: oklch(25% 0.012 264);
+    --status-canceled: oklch(74% 0.14 18);
+    --status-canceled-soft: oklch(27% 0.06 18);
+
+    --chart-1: oklch(72% 0.16 268);
+    --chart-2: oklch(76% 0.13 245);
+    --chart-3: oklch(76% 0.15 156);
+    --chart-4: oklch(80% 0.13 78);
+
+    --shadow-raised: 0 1px 2px 0 rgb(0 0 0 / 0.3), 0 1px 3px 0 rgb(0 0 0 / 0.25);
+    --shadow-overlay: 0 8px 24px -4px rgb(0 0 0 / 0.45), 0 2px 6px -2px rgb(0 0 0 / 0.35);
+  }
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+  --surface: oklch(17% 0.012 264);
+  --surface-raised: oklch(20.5% 0.013 264);
+  --surface-sunken: oklch(14.5% 0.011 264);
+  --surface-hover: oklch(24% 0.014 264);
+  --border: oklch(28% 0.014 264);
+  --border-strong: oklch(36% 0.016 264);
+
+  --text: oklch(96% 0.004 264);
+  --text-muted: oklch(74% 0.012 264);
+  --text-subtle: oklch(58% 0.013 264);
+  --text-inverted: oklch(17% 0.012 264);
+
+  --accent: oklch(72% 0.16 268);
+  --accent-hover: oklch(78% 0.15 268);
+  --accent-soft: oklch(28% 0.06 268);
+  --focus: oklch(72% 0.16 268);
+
+  --status-pending: oklch(72% 0.02 264);
+  --status-pending-soft: oklch(26% 0.012 264);
+  --status-partially-funded: oklch(80% 0.13 78);
+  --status-partially-funded-soft: oklch(29% 0.05 62);
+  --status-confirming: oklch(76% 0.13 245);
+  --status-confirming-soft: oklch(27% 0.06 245);
+  --status-completed: oklch(76% 0.15 156);
+  --status-completed-soft: oklch(26% 0.06 156);
+  --status-overpaid: oklch(78% 0.12 196);
+  --status-overpaid-soft: oklch(26% 0.05 196);
+  --status-underpaid: oklch(78% 0.14 52);
+  --status-underpaid-soft: oklch(28% 0.06 42);
+  --status-expired: oklch(66% 0.018 264);
+  --status-expired-soft: oklch(25% 0.012 264);
+  --status-canceled: oklch(74% 0.14 18);
+  --status-canceled-soft: oklch(27% 0.06 18);
+
+  --chart-1: oklch(72% 0.16 268);
+  --chart-2: oklch(76% 0.13 245);
+  --chart-3: oklch(76% 0.15 156);
+  --chart-4: oklch(80% 0.13 78);
+
+  --shadow-raised: 0 1px 2px 0 rgb(0 0 0 / 0.3), 0 1px 3px 0 rgb(0 0 0 / 0.25);
+  --shadow-overlay: 0 8px 24px -4px rgb(0 0 0 / 0.45), 0 2px 6px -2px rgb(0 0 0 / 0.35);
+}
+
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
+
+  body {
+    background-color: var(--color-surface);
+    color: var(--color-text);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+  }
+
+  /**
+   * Every figure a reader compares down a column: amounts, counts, confirmations, timestamps.
+   * Proportional digits make a column of numbers ripple, and a rippling column is one nobody scans.
+   */
+  .tabular {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: 'tnum';
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-focus);
+    outline-offset: 2px;
+  }
+
+  /* Respecting a reduced-motion preference is not optional on a page showing a payment countdown. */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+@keyframes cryptopay-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
+@keyframes cryptopay-shimmer {
+  from {
+    background-position: -200% 0;
+  }
+  to {
+    background-position: 200% 0;
+  }
+}
+
+.animate-status-pulse {
+  animation: cryptopay-pulse 2s ease-in-out infinite;
+}
+
+/* The one place a gradient is allowed: a skeleton is not a data surface. */
+.skeleton {
+  background-image: linear-gradient(
+    90deg,
+    var(--color-surface-sunken) 25%,
+    var(--color-surface-hover) 37%,
+    var(--color-surface-sunken) 63%
+  );
+  background-size: 200% 100%;
+  animation: cryptopay-shimmer 1.4s ease-in-out infinite;
+}
