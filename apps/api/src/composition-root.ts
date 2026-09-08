@@ -6,6 +6,7 @@ import { CancelPaymentUseCase } from './application/cancel-payment.use-case.js';
 import { CreatePaymentUseCase } from './application/create-payment.use-case.js';
 import { DeliverCallbacksUseCase } from './application/deliver-callbacks.use-case.js';
 import { EvaluatePaymentsUseCase } from './application/evaluate-payments.use-case.js';
+import { ReconcilePaymentsUseCase } from './application/reconcile-payments.use-case.js';
 import { ScanNetworkUseCase } from './application/scan-network.use-case.js';
 import { SettlePaymentsUseCase } from './application/settle-payments.use-case.js';
 import { LIVE_RETRY_POLICY, TEST_RETRY_POLICY } from './domain/webhook-retry.js';
@@ -54,6 +55,7 @@ import { WalletSigningProvider } from './infrastructure/wallet/signing-provider.
 import { createLogger, type StructuredLogger } from './observability/logger.js';
 import { CallbackWorker } from './workers/callback-worker.js';
 import { NetworkWorker } from './workers/network-worker.js';
+import { ReconciliationWorker } from './workers/reconciliation-worker.js';
 import { SettlementWorker } from './workers/settlement-worker.js';
 
 /**
@@ -309,45 +311,76 @@ export function composeChainWorker(
   const evaluationQueueRepository = new EvaluationQueueRepository(databasePool);
   const ulidFactory = new UlidFactory();
 
-  const workers = Object.values(NETWORK_CONFIGURATIONS)
-    .filter((network) => rpcUrlsFor(configuration, network.networkIdentifier).length > 0)
-    .map((network) => {
-      const gateway = gatewayFor(configuration, network);
+  const watched = Object.values(NETWORK_CONFIGURATIONS).filter(
+    (network) => rpcUrlsFor(configuration, network.networkIdentifier).length > 0,
+  );
 
-      return new NetworkWorker({
+  /**
+   * One reconciler per network, on its own lease. Deliberately not folded into the network worker:
+   * a network whose scanner has halted is exactly the one whose database and chain drift apart, and
+   * a reconciler sharing that lease would fall silent at the moment it became useful.
+   */
+  const reconcilers = watched.map((network) => {
+    const gateway = gatewayFor(configuration, network);
+    return new ReconciliationWorker({
+      network: network.networkIdentifier,
+      reconciler: new ReconcilePaymentsUseCase({
         gateway,
-        scanner: new ScanNetworkUseCase({
-          gateway,
-          paymentRepository,
-          paymentTransferRepository,
-          blockCursorRepository,
-          observedBlockRepository,
-          chainScanStore,
-          ulidFactory,
-          now: () => new Date(),
-        }),
-        evaluator: new EvaluatePaymentsUseCase({
-          gateway,
-          paymentRepository,
-          paymentTransferRepository,
-          evaluationQueueRepository,
-          now: () => new Date(),
-          workerIdentity: holderIdentity,
-          ulidFactory,
-          checkoutBaseUrl: configuration.publicCheckoutBaseUrl,
-        }),
-        leaseRepository,
-        blockCursorRepository,
-        logger,
-        holderIdentity,
-        options: {
-          leaseSeconds: configuration.scannerLeaseSeconds,
-          pollIntervalMilliseconds: configuration.scannerPollIntervalMilliseconds,
-          errorBackoffMilliseconds: configuration.scannerPollIntervalMilliseconds * 3,
-          initialScanRange: 20,
-        },
-      });
+        paymentRepository,
+        paymentTransferRepository,
+        evaluationQueueRepository,
+        now: () => new Date(),
+      }),
+      leaseRepository,
+      holderIdentity,
+      logger,
+      options: {
+        leaseSeconds: configuration.scannerLeaseSeconds,
+        // Far slower than the scanner: this is a safety net, and every tick costs a balance read
+        // per destination.
+        pollIntervalMilliseconds: configuration.scannerPollIntervalMilliseconds * 20,
+        errorBackoffMilliseconds: configuration.scannerPollIntervalMilliseconds * 60,
+      },
     });
+  });
+
+  const workers = watched.map((network) => {
+    const gateway = gatewayFor(configuration, network);
+
+    return new NetworkWorker({
+      gateway,
+      scanner: new ScanNetworkUseCase({
+        gateway,
+        paymentRepository,
+        paymentTransferRepository,
+        blockCursorRepository,
+        observedBlockRepository,
+        chainScanStore,
+        ulidFactory,
+        now: () => new Date(),
+      }),
+      evaluator: new EvaluatePaymentsUseCase({
+        gateway,
+        paymentRepository,
+        paymentTransferRepository,
+        evaluationQueueRepository,
+        now: () => new Date(),
+        workerIdentity: holderIdentity,
+        ulidFactory,
+        checkoutBaseUrl: configuration.publicCheckoutBaseUrl,
+      }),
+      leaseRepository,
+      blockCursorRepository,
+      logger,
+      holderIdentity,
+      options: {
+        leaseSeconds: configuration.scannerLeaseSeconds,
+        pollIntervalMilliseconds: configuration.scannerPollIntervalMilliseconds,
+        errorBackoffMilliseconds: configuration.scannerPollIntervalMilliseconds * 3,
+        initialScanRange: 20,
+      },
+    });
+  });
 
   return {
     logger,
@@ -363,8 +396,12 @@ export function composeChainWorker(
       // chain stops the process rather than producing payments that can never be confirmed.
       await Promise.all(workers.map((worker) => worker.prepare()));
       await Promise.all(workers.map((worker) => worker.start()));
+      for (const reconciler of reconcilers) {
+        reconciler.start();
+      }
     },
     stop: async () => {
+      await Promise.all(reconcilers.map((reconciler) => reconciler.stop()));
       await Promise.all(workers.map((worker) => worker.stop()));
     },
   };

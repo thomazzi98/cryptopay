@@ -190,6 +190,14 @@ function isDuplicateMerchantReference(error: unknown): boolean {
   );
 }
 
+/** A destination the reconciler may read a balance for, with what this system believes it credited. */
+export interface ReconcilableDestination {
+  readonly paymentId: string;
+  readonly account: string;
+  readonly assetReference: string;
+  readonly creditedAmountInBaseUnits: bigint;
+}
+
 export class PaymentRepository {
   private readonly pool: Pool;
 
@@ -334,6 +342,53 @@ export class PaymentRepository {
       [network, terminalGraceSeconds],
     );
     return result.rows.map((row) => row.receiving_account);
+  }
+
+  /**
+   * Live payments whose destination balance is worth comparing against what was credited.
+   *
+   * Ordered by how long it has been since each was last looked at, so a backlog is worked through
+   * rather than the same few rows being re-read every tick. Terminal payments are excluded: a
+   * balance at a completed payment's destination is money awaiting settlement rather than a
+   * discrepancy, and reading it would report a difference on every pass forever.
+   */
+  async findReconcilableDestinations(
+    network: NetworkIdentifier,
+    limit: number,
+  ): Promise<readonly ReconcilableDestination[]> {
+    const result = await this.pool.query<{
+      id: string;
+      receiving_account: string;
+      asset_reference: string;
+      credited_amount: string;
+    }>(
+      `SELECT id, receiving_account, asset_reference, credited_amount
+         FROM payments
+        WHERE network_identifier = $1::network_identifier
+          AND status IN ('pending', 'partially_funded', 'confirming')
+        ORDER BY reconciled_at NULLS FIRST, created_at
+        LIMIT $2`,
+      [network, limit],
+    );
+
+    return result.rows.map((row) => ({
+      paymentId: row.id,
+      account: row.receiving_account,
+      assetReference: row.asset_reference,
+      creditedAmountInBaseUnits: BigInt(row.credited_amount),
+    }));
+  }
+
+  /** Records that a destination was compared, so the next tick reaches a different one. */
+  async markDestinationsReconciled(paymentIds: readonly string[], at: Date): Promise<number> {
+    if (paymentIds.length === 0) {
+      return 0;
+    }
+    const result = await this.pool.query(
+      `UPDATE payments SET reconciled_at = $2 WHERE id = ANY($1::text[])`,
+      [[...paymentIds], at],
+    );
+    return result.rowCount ?? 0;
   }
 
   /**

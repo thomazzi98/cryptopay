@@ -42,12 +42,15 @@ export class EvaluationQueueRepository {
    * Used by the browser hint, which is a latency optimisation and nothing more: the payment is
    * looked at sooner, and every figure is still re-derived from the chain.
    */
-  async enqueue(paymentId: string): Promise<void> {
-    await this.pool.query(
+  async enqueue(paymentId: string): Promise<boolean> {
+    const result = await this.pool.query(
       `INSERT INTO payment_evaluation_queue (payment_id) VALUES ($1)
        ON CONFLICT (payment_id) DO NOTHING`,
       [paymentId],
     );
+    // Whether this call was the one that queued it. A payment already waiting is not queued twice,
+    // and reconciliation counts what it actually caused rather than what it asked for.
+    return (result.rowCount ?? 0) > 0;
   }
 
   /**

@@ -12,6 +12,16 @@ import type { TransferClassification } from '../../domain/transfer-ledger.js';
  * order events happened to arrive in.
  */
 
+/** The columns reconciliation needs to re-ask the chain about a transfer it already recorded. */
+export interface ReconcilableTransfer {
+  readonly identifier: string;
+  readonly paymentId: string;
+  readonly transactionReference: string;
+  readonly eventIndex: number;
+  readonly blockHeight: bigint;
+  readonly blockReference: string;
+}
+
 export interface StoredTransfer {
   readonly identifier: string;
   readonly paymentId: string;
@@ -88,6 +98,77 @@ export class PaymentTransferRepository {
   }
 
   /** Stops re-checking a transfer once its block can no longer be reorganised away. */
+  /**
+   * Transfers worth re-asking the chain about: credited, still believed present, and below the
+   * finalized height. Above that height a disagreement is ordinary and the scanner is still
+   * working through it, so asking would produce noise rather than findings.
+   *
+   * Oldest first, so a backlog is worked through rather than the same recent rows being re-checked
+   * on every tick.
+   */
+  async findReconcilable(
+    networkIdentifier: NetworkIdentifier,
+    finalizedHeight: bigint,
+    limit: number,
+  ): Promise<readonly ReconcilableTransfer[]> {
+    const result = await this.pool.query<{
+      id: string;
+      payment_id: string;
+      transaction_reference: string;
+      event_index: number;
+      block_height: string;
+      block_reference: string;
+    }>(
+      `SELECT id, payment_id, transaction_reference, event_index, block_height, block_reference
+         FROM payment_transfers
+        WHERE network_identifier = $1::network_identifier
+          AND classification = 'credited'
+          AND observation <> 'orphaned'
+          AND block_height <= $2
+        ORDER BY reconciled_at NULLS FIRST, block_height
+        LIMIT $3`,
+      [networkIdentifier, finalizedHeight.toString(), limit],
+    );
+
+    return result.rows.map((row) => ({
+      identifier: row.id,
+      paymentId: row.payment_id,
+      transactionReference: row.transaction_reference,
+      eventIndex: row.event_index,
+      blockHeight: BigInt(row.block_height),
+      blockReference: row.block_reference,
+    }));
+  }
+
+  /** Records that a transfer was checked, so the next tick looks at a different one. */
+  async markReconciled(identifiers: readonly string[], at: Date): Promise<number> {
+    if (identifiers.length === 0) {
+      return 0;
+    }
+    const result = await this.pool.query(
+      `UPDATE payment_transfers SET reconciled_at = $2 WHERE id = ANY($1::text[])`,
+      [[...identifiers], at],
+    );
+    return result.rowCount ?? 0;
+  }
+
+  /**
+   * Withdraws a transfer that is no longer on the canonical chain.
+   *
+   * Guarded on the row still being unorphaned, so two reconciliation passes cannot both report the
+   * same withdrawal. The payment's credited total is recomputed from the surviving rows by the
+   * evaluation path; nothing is decremented here.
+   */
+  async markOrphaned(identifier: string, at: Date): Promise<boolean> {
+    const result = await this.pool.query(
+      `UPDATE payment_transfers
+          SET observation = 'orphaned', orphaned_at = $2, reconciled_at = $2
+        WHERE id = $1 AND observation <> 'orphaned'`,
+      [identifier, at],
+    );
+    return (result.rowCount ?? 0) > 0;
+  }
+
   async markFinalizedUpTo(networkIdentifier: NetworkIdentifier, height: bigint): Promise<number> {
     const result = await this.pool.query(
       `UPDATE payment_transfers
