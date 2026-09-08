@@ -98,8 +98,19 @@ export function buildApplicationServer(
     ulidFactory,
     now: () => new Date(),
     randomToken: () => randomBytes(CHECKOUT_TOKEN_BYTES).toString('base64url'),
+    // The same rules the delivery worker applies, so a merchant is refused at creation for exactly
+    // the reason a delivery would have been refused later.
+    callbackDestinationPolicy: {
+      privateDestinationAllowlist: configuration.callbackPrivateDestinationAllowlist,
+      allowlistIsPermitted: configuration.nodeEnvironment !== 'production',
+    },
   });
-  const paymentCanceler = new CancelPaymentUseCase(paymentRepository);
+  const paymentCanceler = new CancelPaymentUseCase({
+    paymentRepository,
+    ulidFactory,
+    checkoutBaseUrl: configuration.publicCheckoutBaseUrl,
+    now: () => new Date(),
+  });
 
   return buildServer({
     configuration,
