@@ -40,6 +40,28 @@ export const USDC_BRIDGED_POLYGON_MAINNET_ADDRESS = '0x2791bca1f2de4661ed88a30c9
 export const ERC20_TRANSFER_EVENT_TOPIC =
   '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
 
+/**
+ * TRON identifies a chain by its genesis block rather than by a number, which is why ledger identity
+ * is an opaque string in this system. Read from each network on 8 September 2026. Written with the
+ * 0x prefix this codebase uses for every hash, which also keeps a bare sixty-four character hex run
+ * out of the source, since that is indistinguishable from a private key to any scanner.
+ */
+export const TRON_MAINNET_GENESIS_IDENTITY =
+  '0x00000000000000001ebf88508a03865c71d452e25f4d51194196a1d22b6653dc';
+export const TRON_NILE_GENESIS_IDENTITY =
+  '0x0000000000000000d698d4192c56cb6be724a558448e2684802de4d6cd8690dc';
+
+export const TRON_NATIVE_CURRENCY_SYMBOL = 'TRX';
+/** One TRX is a million SUN. Not eighteen, which is the assumption an EVM habit would carry over. */
+export const TRON_NATIVE_CURRENCY_DECIMALS = 6;
+
+/** Tether on TRON, verified on chain: symbol USDT, six decimals, on both networks. */
+export const USDT_TRON_MAINNET_ADDRESS = 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t';
+export const USDT_TRON_NILE_ADDRESS = 'TXLAQ63Xg1NAzckPwKHvzw7CSEmLMEqcdj';
+
+export const TRON_MAINNET_EXPLORER_BASE_URL = 'https://tronscan.org/#';
+export const TRON_NILE_EXPLORER_BASE_URL = 'https://nile.tronscan.org/#';
+
 export const POLYGON_MAINNET_EXPLORER_BASE_URL = 'https://polygonscan.com';
 export const POLYGON_AMOY_EXPLORER_BASE_URL = 'https://amoy.polygonscan.com';
 

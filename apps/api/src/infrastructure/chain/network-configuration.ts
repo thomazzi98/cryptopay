@@ -1,5 +1,13 @@
 import { TOKEN_REGISTRY } from './token-registry.js';
 import {
+  TRON_MAINNET_EXPLORER_BASE_URL,
+  TRON_MAINNET_GENESIS_IDENTITY,
+  TRON_NATIVE_CURRENCY_DECIMALS,
+  TRON_NATIVE_CURRENCY_SYMBOL,
+  TRON_NILE_EXPLORER_BASE_URL,
+  TRON_NILE_GENESIS_IDENTITY,
+} from '@cryptopay/shared';
+import {
   LOCAL_ANVIL_CHAIN_IDENTIFIER,
   POLYGON_AMOY_CHAIN_IDENTIFIER,
   POLYGON_AMOY_EXPLORER_BASE_URL,
@@ -188,6 +196,69 @@ export const NETWORK_CONFIGURATIONS: Readonly<Record<NetworkIdentifier, NetworkC
       assetAllowlist: allowlistFrom('local-anvil'),
       assetDenylist: Object.freeze([]),
       explorerBaseUrl: '',
+    }),
+
+    'tron-mainnet': Object.freeze({
+      networkIdentifier: 'tron-mainnet',
+      networkFamily: 'tron',
+      ledgerIdentity: TRON_MAINNET_GENESIS_IDENTITY,
+      evmChainId: null,
+      addressForm: 'base58-exact',
+      referenceForm: 'bare-hex',
+      capabilities: Object.freeze({
+        supportsNativePayments: true,
+        supportsTokenPayments: true,
+        supportsPaymentUri: true,
+        supportsEventMonitoring: true,
+        supportsFinalityTracking: true,
+        supportsMemo: false,
+        // TRON is watched, never signed on. No key is derived for it and nothing sweeps it, which is
+        // what keeps a custodial destination from being offered on a chain this system cannot spend
+        // from.
+        supportsSettlement: false,
+      }),
+      displayName: 'TRON',
+      environment: 'live',
+      nativeCurrency: {
+        symbol: TRON_NATIVE_CURRENCY_SYMBOL,
+        decimals: TRON_NATIVE_CURRENCY_DECIMALS,
+      },
+      requiredConfirmations: 19,
+      requiresFinalityTag: true,
+      maximumReorgDepth: 32,
+      assetAllowlist: allowlistFrom('tron-mainnet'),
+      assetDenylist: Object.freeze([]),
+      explorerBaseUrl: TRON_MAINNET_EXPLORER_BASE_URL,
+    }),
+
+    'tron-nile': Object.freeze({
+      networkIdentifier: 'tron-nile',
+      networkFamily: 'tron',
+      ledgerIdentity: TRON_NILE_GENESIS_IDENTITY,
+      evmChainId: null,
+      addressForm: 'base58-exact',
+      referenceForm: 'bare-hex',
+      capabilities: Object.freeze({
+        supportsNativePayments: true,
+        supportsTokenPayments: true,
+        supportsPaymentUri: true,
+        supportsEventMonitoring: true,
+        supportsFinalityTracking: true,
+        supportsMemo: false,
+        supportsSettlement: false,
+      }),
+      displayName: 'TRON Nile',
+      environment: 'test',
+      nativeCurrency: {
+        symbol: TRON_NATIVE_CURRENCY_SYMBOL,
+        decimals: TRON_NATIVE_CURRENCY_DECIMALS,
+      },
+      requiredConfirmations: 19,
+      requiresFinalityTag: true,
+      maximumReorgDepth: 32,
+      assetAllowlist: allowlistFrom('tron-nile'),
+      assetDenylist: Object.freeze([]),
+      explorerBaseUrl: TRON_NILE_EXPLORER_BASE_URL,
     }),
   });
 

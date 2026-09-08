@@ -92,6 +92,8 @@ const ConfigurationSchema = z
      */
     polygonMainnetRpcUrls: z.array(z.url()).max(8).default([]),
     polygonAmoyRpcUrls: z.array(z.url()).max(8).default([]),
+    tronMainnetRpcUrls: z.array(z.url()).max(8).default([]),
+    tronNileRpcUrls: z.array(z.url()).max(8).default([]),
     localAnvilRpcUrls: z.array(z.url()).max(8).default([]),
 
     /**
@@ -246,6 +248,8 @@ export function loadConfiguration(source: EnvironmentSource): Configuration {
     walletKeyEncryptionKey: source.WALLET_KEY_ENCRYPTION_KEY,
     polygonMainnetRpcUrls: parseCommaSeparated(source.POLYGON_MAINNET_RPC_URLS),
     polygonAmoyRpcUrls: parseCommaSeparated(source.POLYGON_AMOY_RPC_URLS),
+    tronMainnetRpcUrls: parseCommaSeparated(source.TRON_MAINNET_RPC_URLS),
+    tronNileRpcUrls: parseCommaSeparated(source.TRON_NILE_RPC_URLS),
     localAnvilRpcUrls: parseCommaSeparated(source.LOCAL_ANVIL_RPC_URLS),
     polygonMainnetWalletRpcUrl: optionalText(source.POLYGON_MAINNET_WALLET_RPC_URL),
     polygonAmoyWalletRpcUrl: optionalText(source.POLYGON_AMOY_WALLET_RPC_URL),
@@ -287,6 +291,8 @@ export function rpcUrlsFor(
     'polygon-mainnet': configuration.polygonMainnetRpcUrls,
     'polygon-amoy': configuration.polygonAmoyRpcUrls,
     'local-anvil': configuration.localAnvilRpcUrls,
+    'tron-mainnet': configuration.tronMainnetRpcUrls,
+    'tron-nile': configuration.tronNileRpcUrls,
   };
   return byNetwork[network];
 }
@@ -305,6 +311,9 @@ export function spendCeilingFor(
     'polygon-mainnet': configuration.polygonMainnetSpendCeiling,
     'polygon-amoy': configuration.polygonAmoySpendCeiling,
     'local-anvil': configuration.localAnvilSpendCeiling,
+    // Nothing signs on TRON, so there is no spend to bound.
+    'tron-mainnet': undefined,
+    'tron-nile': undefined,
   };
   const configured = byNetwork[network];
   if (configured === undefined) {
@@ -327,6 +336,9 @@ export function walletRpcUrlFor(
     'polygon-mainnet': configuration.polygonMainnetWalletRpcUrl,
     'polygon-amoy': configuration.polygonAmoyWalletRpcUrl,
     'local-anvil': configuration.localAnvilWalletRpcUrl,
+    // A TRON payment is made by scanning a QR code, not by a browser wallet reaching an endpoint.
+    'tron-mainnet': undefined,
+    'tron-nile': undefined,
   };
   return byNetwork[network] ?? null;
 }

@@ -2,6 +2,8 @@ import {
   isCanonicalAccount,
   USDC_POLYGON_AMOY_ADDRESS,
   USDC_POLYGON_MAINNET_ADDRESS,
+  USDT_TRON_MAINNET_ADDRESS,
+  USDT_TRON_NILE_ADDRESS,
   type AddressForm,
   type NetworkIdentifier,
 } from '@cryptopay/shared';
@@ -75,6 +77,36 @@ export const TOKEN_REGISTRY: Readonly<Record<NetworkIdentifier, readonly Registe
       Object.freeze({
         currency: 'USDC',
         reference: USDC_POLYGON_AMOY_ADDRESS,
+        decimals: 6,
+        kind: 'token' as const,
+      }),
+    ]),
+
+    'tron-mainnet': Object.freeze([
+      Object.freeze({
+        currency: 'TRX',
+        reference: NATIVE_ASSET_REFERENCE,
+        decimals: 6,
+        kind: 'native' as const,
+      }),
+      Object.freeze({
+        currency: 'USDT',
+        reference: USDT_TRON_MAINNET_ADDRESS,
+        decimals: 6,
+        kind: 'token' as const,
+      }),
+    ]),
+
+    'tron-nile': Object.freeze([
+      Object.freeze({
+        currency: 'TRX',
+        reference: NATIVE_ASSET_REFERENCE,
+        decimals: 6,
+        kind: 'native' as const,
+      }),
+      Object.freeze({
+        currency: 'USDT',
+        reference: USDT_TRON_NILE_ADDRESS,
         decimals: 6,
         kind: 'token' as const,
       }),

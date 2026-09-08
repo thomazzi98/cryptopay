@@ -25,8 +25,12 @@ import {
   NETWORK_CONFIGURATIONS,
   registerLocalDevelopmentAsset,
   requireEvmChainId,
+  type NetworkConfiguration,
 } from './infrastructure/chain/network-configuration.js';
 import { TOKEN_REGISTRY, validateTokenRegistry } from './infrastructure/chain/token-registry.js';
+import type { ChainGateway } from './application/ports/chain-gateway.port.js';
+import { TronChainGateway } from './infrastructure/chain/tron/tron-chain-gateway.js';
+import { HttpTronNode } from './infrastructure/chain/tron/tron-client.js';
 import { BlockCursorRepository } from './infrastructure/persistence/block-cursor.repository.js';
 import { ChainScanStore } from './infrastructure/persistence/chain-scan.store.js';
 import { createDatabasePool } from './infrastructure/persistence/database.js';
@@ -233,6 +237,37 @@ export function composeCallbackWorker(
  * mistake: there is no way to name a network to watch and forget to give it an endpoint, and no way
  * to configure an endpoint that silently goes unwatched.
  */
+/**
+ * The adapter a network is read through, chosen by family.
+ *
+ * One lookup rather than a chain of conditions, so adding a family is an entry here and an adapter
+ * beside it. Nothing above this line knows which chain it is talking to.
+ */
+function gatewayFor(configuration: Configuration, network: NetworkConfiguration): ChainGateway {
+  const rpcUrls = rpcUrlsFor(configuration, network.networkIdentifier);
+  if (network.networkFamily === 'tron') {
+    const endpoint = rpcUrls[0];
+    if (endpoint === undefined) {
+      throw new Error(`No endpoint is configured for ${network.networkIdentifier}`);
+    }
+    return new TronChainGateway({
+      networkIdentifier: network.networkIdentifier,
+      node: new HttpTronNode({ baseUrl: endpoint, apiKey: null }),
+      expectedLedgerIdentity: network.ledgerIdentity,
+    });
+  }
+  return new EvmChainGateway({
+    networkIdentifier: network.networkIdentifier,
+    chainIdentifier: requireEvmChainId(network),
+    rpcUrls,
+    supportsFinalityTag: network.requiresFinalityTag,
+    // The endpoints after the first, so the second opinion never comes from the endpoint that gave
+    // the first one. With a single endpoint configured there is no quorum, and a payment requiring
+    // the finality tag holds rather than completing on one provider's word.
+    finalityQuorumRpcUrls: rpcUrls.slice(1),
+  });
+}
+
 export function composeChainWorker(
   source: NodeJS.ProcessEnv,
   holderIdentity: string,
@@ -264,17 +299,7 @@ export function composeChainWorker(
   const workers = Object.values(NETWORK_CONFIGURATIONS)
     .filter((network) => rpcUrlsFor(configuration, network.networkIdentifier).length > 0)
     .map((network) => {
-      const rpcUrls = rpcUrlsFor(configuration, network.networkIdentifier);
-      const gateway = new EvmChainGateway({
-        networkIdentifier: network.networkIdentifier,
-        chainIdentifier: requireEvmChainId(network),
-        rpcUrls,
-        supportsFinalityTag: network.requiresFinalityTag,
-        // The endpoints after the first, so the second opinion never comes from the endpoint that
-        // gave the first one. With a single endpoint configured there is no quorum, and a payment
-        // requiring the finality tag holds rather than completing on one provider's word.
-        finalityQuorumRpcUrls: rpcUrls.slice(1),
-      });
+      const gateway = gatewayFor(configuration, network);
 
       return new NetworkWorker({
         gateway,

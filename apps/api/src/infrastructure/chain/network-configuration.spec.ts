@@ -48,10 +48,20 @@ describe('the network table', () => {
   });
 
   // The property that makes a test key incapable of reaching mainnet: exactly one network is live.
-  it('places exactly one network in the live environment', () => {
-    expect(networksForEnvironment('live').map((entry) => entry.networkIdentifier)).toStrictEqual([
-      'polygon-mainnet',
-    ]);
+  /**
+   * One live deployment per family, which is what makes the gateway contract's promise safe: a
+   * caller names a family and the environment picks the network, so two live Polygon networks would
+   * make that choice ambiguous rather than determined.
+   */
+  it('places exactly one live network in each family', () => {
+    const live = networksForEnvironment('live');
+    const families = live.map((entry) => entry.networkFamily);
+    expect(new Set(families).size).toBe(families.length);
+    expect(
+      live
+        .map((entry) => entry.networkIdentifier)
+        .toSorted((left, right) => left.localeCompare(right)),
+    ).toStrictEqual(['polygon-mainnet', 'tron-mainnet']);
   });
 
   it('places the remaining networks in the test environment', () => {
@@ -185,10 +195,15 @@ describe('explorer links', () => {
  * customer whose transfer was never credited.
  */
 describe('the rules any new network must satisfy', () => {
-  it.each(ALL_NETWORKS)('%s identifies every asset by a lowercase address', (network) => {
+  /**
+   * Written as "canonical for this network" rather than "lowercase", because lowercase was always
+   * the EVM rule. Lowercasing a base58 TRON address does not produce a quieter spelling of the same
+   * token; it produces a string that is not an address at all.
+   */
+  it.each(ALL_NETWORKS)('%s identifies every asset in its own canonical form', (network) => {
     const configuration = networkConfigurationFor(network);
     for (const asset of [...configuration.assetAllowlist, ...configuration.assetDenylist]) {
-      expect(asset.reference).toBe(asset.reference.toLowerCase());
+      expect(isCanonicalAccount(configuration.addressForm, asset.reference)).toBe(true);
     }
   });
 
@@ -368,9 +383,13 @@ describe('what each network says it can do', () => {
    */
   it('claims no capability whose implementation has not landed', () => {
     for (const network of ALL_NETWORKS) {
-      const { capabilities } = networkConfigurationFor(network);
-      expect(capabilities.supportsNativePayments).toBe(false);
-      expect(capabilities.supportsMemo).toBe(false);
+      const configuration = networkConfigurationFor(network);
+      // TRON reads native TransferContract entries out of the block body, so it claims native
+      // payments and the adapter tests drive that path. The EVM adapter does not read block bodies
+      // yet, so Polygon does not claim it.
+      const nativeIsImplemented = configuration.networkFamily === 'tron';
+      expect(configuration.capabilities.supportsNativePayments).toBe(nativeIsImplemented);
+      expect(configuration.capabilities.supportsMemo).toBe(false);
     }
   });
 });

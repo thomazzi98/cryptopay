@@ -7,7 +7,8 @@
  * to a chain-specific shape such as viem's `0x${string}`.
  */
 
-export type NetworkIdentifier = 'polygon-mainnet' | 'polygon-amoy' | 'local-anvil';
+export type NetworkIdentifier =
+  'polygon-mainnet' | 'polygon-amoy' | 'local-anvil' | 'tron-mainnet' | 'tron-nile';
 
 export type Environment = 'live' | 'test';
 
@@ -15,6 +16,8 @@ export const NETWORK_IDENTIFIERS: readonly NetworkIdentifier[] = Object.freeze([
   'polygon-mainnet',
   'polygon-amoy',
   'local-anvil',
+  'tron-mainnet',
+  'tron-nile',
 ]);
 
 export const ENVIRONMENTS: readonly Environment[] = Object.freeze(['live', 'test']);

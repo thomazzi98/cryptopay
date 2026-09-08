@@ -273,7 +273,13 @@ describe('what payment creation refuses', () => {
     expect(response.json<GatewayError>().error.code).toBe('VALIDATION_FAILED');
   });
 
-  it('refuses a chain family this deployment does not watch', async () => {
+  /**
+   * TRON is a supported family with a real adapter, so the refusal is about this deployment rather
+   * than about the chain: no endpoint is configured, so nothing is watching, so a payment created
+   * there would never be detected. Saying so is the difference between "we do not support that" and
+   * "we cannot serve that right now", and only one of them tells an operator to fix something.
+   */
+  it('refuses a network this deployment is not watching, and says which kind of refusal it is', async () => {
     const response = await createPayment({
       body: {
         externalReference: nextExternalReference(),
@@ -282,8 +288,21 @@ describe('what payment creation refuses', () => {
         amount: '25.00',
       },
     });
+    expect(response.statusCode).toBe(503);
+    expect(response.json<GatewayError>().error.code).toBe('NETWORK_UNAVAILABLE');
+  });
+
+  it('refuses a currency that is real on another family', async () => {
+    const response = await createPayment({
+      body: {
+        externalReference: nextExternalReference(),
+        network: 'polygon',
+        currency: 'TRX',
+        amount: '25.00',
+      },
+    });
     expect(response.statusCode).toBe(422);
-    expect(response.json<GatewayError>().error.code).toBe('UNSUPPORTED_NETWORK');
+    expect(response.json<GatewayError>().error.code).toBe('UNSUPPORTED_CURRENCY');
   });
 
   it('requires an idempotency key, so a retry cannot create a second payment', async () => {
