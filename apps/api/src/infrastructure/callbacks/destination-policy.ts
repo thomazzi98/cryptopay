@@ -186,6 +186,26 @@ const DEFAULT_PORTS: Readonly<Record<string, string>> = Object.freeze({
  * Both gates must already hold before any of this applies, and they are held by different people:
  * the deployment must not be production, and the payment must be in the test environment.
  */
+/**
+ * The half of the policy that needs no network: the scheme, the port, the shape of the host, and
+ * whether the deployment has named this exact destination.
+ *
+ * Exported so payment creation can apply it immediately. A merchant who registers an unreachable
+ * callback URL is told when they register it, with the reason, rather than discovering hours later
+ * that deliveries were refused — and the rule they are told is the same one the delivery worker
+ * applies, because it is the same function.
+ */
+export function checkDestinationShape(
+  destinationUrl: string,
+  options: DestinationPolicyOptions,
+): { readonly allowed: boolean; readonly reason: string } {
+  const parsed = parseDestination(destinationUrl, options);
+  if ('allowed' in parsed) {
+    return { allowed: false, reason: parsed.reason };
+  }
+  return { allowed: true, reason: parsed.allowlisted ? 'permitted by the allowlist' : 'permitted' };
+}
+
 function parseDestination(
   destinationUrl: string,
   options: DestinationPolicyOptions,

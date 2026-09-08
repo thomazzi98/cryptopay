@@ -9,6 +9,10 @@ import type { PoolClient } from 'pg';
 
 import { createPayment, type Payment } from '../domain/payment.js';
 import {
+  checkDestinationShape,
+  type DestinationPolicyOptions,
+} from '../infrastructure/callbacks/destination-policy.js';
+import {
   findAllowedAsset,
   networkConfigurationFor,
 } from '../infrastructure/chain/network-configuration.js';
@@ -29,7 +33,8 @@ export type CreatePaymentFailure =
   | { readonly reason: 'environment_mismatch'; readonly detail: string }
   | { readonly reason: 'unknown_asset'; readonly detail: string }
   | { readonly reason: 'invalid_amount'; readonly detail: string }
-  | { readonly reason: 'network_not_watched'; readonly detail: string };
+  | { readonly reason: 'network_not_watched'; readonly detail: string }
+  | { readonly reason: 'unreachable_callback'; readonly detail: string };
 
 export type CreatePaymentResult =
   | { readonly kind: 'created'; readonly payment: Payment }
@@ -43,6 +48,11 @@ export interface CreatePaymentDependencies {
   readonly ulidFactory: UlidFactory;
   readonly now: () => Date;
   readonly randomToken: () => string;
+  /**
+   * The deployment's callback destination rules, so a merchant registering an unreachable URL is
+   * told now rather than after a delivery is refused. The same function decides at delivery time.
+   */
+  readonly callbackDestinationPolicy: DestinationPolicyOptions;
 }
 
 export interface CreatePaymentCommand {
@@ -104,6 +114,24 @@ export class CreatePaymentUseCase {
     }
     if (requestedAmountInBaseUnits <= 0n) {
       return failed({ reason: 'invalid_amount', detail: 'The amount must be greater than zero.' });
+    }
+
+    // Checked now, with the same function the delivery worker uses, so a merchant learns their
+    // callback is unreachable while they are looking at the response rather than from a delivery log
+    // hours later. DNS is deliberately left to delivery time: resolving here would make payment
+    // creation depend on a name server, and the answer can change before the first attempt anyway.
+    const callbackUrl = request.callbackUrl;
+    if (callbackUrl !== undefined && callbackUrl !== null) {
+      const destination = checkDestinationShape(
+        callbackUrl,
+        this.dependencies.callbackDestinationPolicy,
+      );
+      if (!destination.allowed) {
+        return failed({
+          reason: 'unreachable_callback',
+          detail: `The callback URL cannot be used: ${destination.reason}.`,
+        });
+      }
     }
 
     // Refusing here is deliberate. A payment created for a network no scanner is watching would
