@@ -245,12 +245,25 @@ export class PaymentRepository {
     }
   }
 
-  async findById(merchantId: string, paymentId: string): Promise<Payment | null> {
-    // Scoped by merchant in the query rather than checked afterwards, so a missing row and another
-    // merchant's row are indistinguishable and both answer 404.
+  /**
+   * Scoped by merchant AND by environment, both in the query rather than checked afterwards.
+   *
+   * The merchant predicate makes a missing payment and another merchant's payment indistinguishable,
+   * so both answer 404 and neither confirms that an identifier exists. The environment predicate is
+   * what makes the test and live separation real for a single payment: a merchant holds keys for
+   * both, and without it a `cp_test_` key could read — and cancel — that merchant's own mainnet
+   * payments. The list endpoint has always filtered on it; this one is the same rule applied to the
+   * one row at a time case.
+   */
+  async findById(
+    merchantId: string,
+    environment: Environment,
+    paymentId: string,
+  ): Promise<Payment | null> {
     const result = await this.pool.query<PaymentRow>(
-      `SELECT ${PAYMENT_COLUMNS} FROM payments WHERE id = $1 AND merchant_id = $2`,
-      [paymentId, merchantId],
+      `SELECT ${PAYMENT_COLUMNS} FROM payments
+        WHERE id = $1 AND merchant_id = $2 AND environment = $3::environment_name`,
+      [paymentId, merchantId, environment],
     );
     const row = result.rows[0];
     if (row === undefined) {

@@ -81,6 +81,7 @@ export function registerPaymentRoutes(
     const authenticated = requireMerchant(request);
     const payment = await dependencies.paymentRepository.findById(
       authenticated.merchantId,
+      authenticated.environment,
       paymentId,
     );
     if (payment === null) {
@@ -229,6 +230,7 @@ export function registerPaymentRoutes(
       const authenticated = requireMerchant(request);
       const payment = await dependencies.paymentRepository.findById(
         authenticated.merchantId,
+        authenticated.environment,
         request.params.paymentId,
       );
 
@@ -305,6 +307,7 @@ export function registerPaymentRoutes(
       const authenticated = requireMerchant(request);
       const result = await dependencies.paymentCanceler.execute(
         authenticated.merchantId,
+        authenticated.environment,
         request.params.paymentId,
       );
 
