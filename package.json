@@ -37,7 +37,8 @@
     "test:all": "vitest run",
     "scan:secrets": "node scripts/scan-secrets.mjs",
     "check:testnet-key": "node scripts/check-testnet-key.mjs",
-    "demo": "node scripts/demo.mjs"
+    "demo": "node scripts/demo.mjs",
+    "validate:amoy": "node scripts/validate-amoy.mjs"
   },
   "devDependencies": {
     "@commitlint/cli": "21.2.2",

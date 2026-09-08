@@ -1,0 +1,56 @@
+name: Amoy validation
+
+# One real payment on Polygon Amoy, gated four ways, and each gate is load-bearing.
+#
+# It never runs on a push or a pull request, so a fork cannot trigger it. It reads its key from a
+# GitHub Environment, which a fork's pull request cannot reach at all. It is a separate workflow file
+# rather than a job inside CI, so it cannot be reached by editing a matrix. And it spends real testnet
+# funds, so it is triggered by a person or by a schedule slow enough that a faucet-funded key survives.
+#
+# There is deliberately no mainnet equivalent. Mainnet is validated once, by hand, by someone who
+# meant to.
+on:
+  workflow_dispatch:
+    inputs:
+      amount:
+        description: USDC to send. Keep it small; the gas budget is the scarce resource.
+        required: false
+        default: '0.01'
+  schedule:
+    - cron: '0 6 * * 1'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: One real payment on Polygon Amoy
+    runs-on: ubuntu-latest
+    # The Environment is the gate that matters: its secrets are unreachable from a fork.
+    environment: amoy-testnet
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+
+      # Before the key is ever used to sign. A variable named for a testnet confines nothing: one
+      # secp256k1 key controls the same address on every EVM chain, so a key with mainnet history is
+      # a mainnet key wherever it is written down.
+      - name: Refuse a key that is active on any mainnet
+        env:
+          AMOY_TESTNET_PRIVATE_KEY: ${{ secrets.AMOY_TESTNET_PRIVATE_KEY }}
+        run: node scripts/check-testnet-key.mjs
+
+      # One startup path, shared with `npm run demo`, so the thing being validated is the thing that
+      # runs locally. The key is handed to the validation in memory and never written anywhere.
+      - name: Send one payment and watch the backend conclude
+        env:
+          AMOY_TESTNET_PRIVATE_KEY: ${{ secrets.AMOY_TESTNET_PRIVATE_KEY }}
+          POLYGON_AMOY_RPC_URLS: ${{ secrets.POLYGON_AMOY_RPC_URLS }}
+          VALIDATION_AMOUNT: ${{ inputs.amount || '0.01' }}
+        run: node scripts/demo.mjs --with-chain-worker --exec node scripts/validate-amoy.mjs

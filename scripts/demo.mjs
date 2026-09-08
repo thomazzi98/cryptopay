@@ -19,9 +19,21 @@ import { Pool } from 'pg';
  * Every credential here is generated for this run and discarded with the process. Nothing is read
  * from .env and nothing is written to it, so running this cannot disturb a real configuration or
  * leave a secret behind on disk.
+ *
+ * Two flags make the same stack serve the real-network validation, so there is one startup path
+ * rather than two that can drift:
+ *
+ *   --with-chain-worker  also runs the scanner, which the validation needs and a visual look does
+ *                        not. It requires POLYGON_AMOY_RPC_URLS to be set.
+ *   --exec <command>     runs a command with CRYPTOPAY_API_KEY in its environment, then exits with
+ *                        that command's code. The key is handed over in memory rather than written
+ *                        anywhere a later process could read it.
  */
 
 const repositoryRoot = resolve(import.meta.dirname, '..');
+const withChainWorker = process.argv.includes('--with-chain-worker');
+const executeIndex = process.argv.indexOf('--exec');
+const commandToExecute = executeIndex === -1 ? null : process.argv.slice(executeIndex + 1);
 const dataDirectory = mkdtempSync(join(tmpdir(), 'cryptopay-demo-'));
 
 /**
@@ -193,6 +205,39 @@ async function main() {
     HOST: '127.0.0.1',
   });
   await waitForHealth('http://127.0.0.1:3001/healthz', 'The API');
+
+  if (withChainWorker) {
+    const rpcUrls = process.env.POLYGON_AMOY_RPC_URLS ?? '';
+    if (rpcUrls === '') {
+      throw new Error('--with-chain-worker needs POLYGON_AMOY_RPC_URLS to be set.');
+    }
+    console.log('Starting the chain worker...');
+    run('node', ['apps/api/dist/main.chain-worker.js'], {
+      ...serviceEnvironment,
+      POLYGON_AMOY_RPC_URLS: rpcUrls,
+    });
+  }
+
+  if (commandToExecute !== null) {
+    // The key never touches disk: it goes straight into the child's environment and dies with it.
+    console.log(`Running: ${commandToExecute.join(' ')}
+`);
+    const [command, ...argumentList] = commandToExecute;
+    const child = run(command, argumentList, {
+      CRYPTOPAY_API_KEY: issued.presentedKey,
+      CRYPTOPAY_API_URL: 'http://127.0.0.1:3001',
+      ...(process.env.POLYGON_AMOY_RPC_URLS !== undefined && {
+        POLYGON_AMOY_RPC_URLS: process.env.POLYGON_AMOY_RPC_URLS,
+      }),
+    });
+    const code = await new Promise((settle) => {
+      child.on('exit', (exitCode) => {
+        settle(exitCode ?? 1);
+      });
+    });
+    await shutDown(code);
+    return;
+  }
 
   console.log('Starting the dashboard...');
   run('npm', ['run', 'start', '--workspace', 'apps/web'], {
