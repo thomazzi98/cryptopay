@@ -34,7 +34,7 @@ const TREASURY_PATH = "m/44'/60'/1'/0/0";
 export type SigningPath =
   { readonly kind: 'treasury' } | { readonly kind: 'deposit'; readonly derivationIndex: number };
 
-export class SigningKeyError extends Error {
+class SigningKeyError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'SigningKeyError';

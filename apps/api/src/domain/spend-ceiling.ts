@@ -29,7 +29,7 @@ export interface TreasurySpend {
   readonly feePaidInNativeUnits: bigint | null;
 }
 
-export interface ProposedSpend {
+interface ProposedSpend {
   readonly valueInNativeUnits: bigint;
   readonly maximumFeeInNativeUnits: bigint;
 }

@@ -29,7 +29,7 @@ import type { StructuredLogger } from '../observability/logger.js';
  * discover nothing. The interval is measured in tens of seconds.
  */
 
-export interface SettlementWorkerOptions {
+interface SettlementWorkerOptions {
   readonly leaseSeconds: number;
   readonly pollIntervalMilliseconds: number;
   readonly errorBackoffMilliseconds: number;

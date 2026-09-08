@@ -26,6 +26,11 @@ services:
       # --link` work later without crossing a mount boundary. Mounting the old path leaves the image
       # reporting data in an "unused mount/volume" and refusing to become healthy.
       - postgres-data:/var/lib/postgresql
+    # Loopback only, and on a non-default port so it cannot collide with a PostgreSQL already
+    # installed on the machine. Bound so an operator can run migrations, take a backup, or drive a
+    # validation script against the real database; nothing outside this host can reach it.
+    ports:
+      - '127.0.0.1:5433:5432'
     networks: [internal]
     healthcheck:
       # pg_isready over TCP, never a sleep. A fixed wait is either too short on a slow machine or

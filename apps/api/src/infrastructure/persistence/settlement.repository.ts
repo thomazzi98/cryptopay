@@ -14,7 +14,7 @@ import type { TreasurySpend } from '../../domain/spend-ceiling.js';
  * reason they do.
  */
 
-export type ChainTransactionPurpose = 'gas_funding' | 'asset_sweep';
+type ChainTransactionPurpose = 'gas_funding' | 'asset_sweep';
 
 export type ChainTransactionStatus =
   'submitted' | 'confirming' | 'confirmed' | 'reverted' | 'dropped' | 'replaced';

@@ -83,7 +83,7 @@ export interface EvmSettlementBroadcasterOptions {
   readonly requestTimeoutMilliseconds?: number;
 }
 
-export class SettlementConfigurationError extends Error {
+class SettlementConfigurationError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'SettlementConfigurationError';
