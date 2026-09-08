@@ -578,3 +578,92 @@ describe('merchant tolerances', () => {
     );
   });
 });
+
+/**
+ * Accounts are canonical for their own network rather than lowercase for every network. These
+ * assert both halves of that: base58 became storable, and the EVM rule became stricter on the way
+ * past, because `= lower(column)` only ever compared case and never asserted a shape.
+ */
+describe('per-network canonical account form', () => {
+  const TRON_ACCOUNT = 'TXLAQ63Xg1NAzckPwKHvzw7CSEmLMEqcdj';
+
+  it('stores a base58 TRON account with its case intact', async () => {
+    const id = await insertPayment({
+      network: 'tron-nile',
+      receivingAccount: TRON_ACCOUNT,
+      assetReference: 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t',
+    });
+    const stored = await pool.query<{ receiving_account: string }>(
+      'SELECT receiving_account FROM payments WHERE id = $1',
+      [id],
+    );
+    expect(stored.rows[0]?.receiving_account).toBe(TRON_ACCOUNT);
+  });
+
+  /**
+   * The failure the whole migration exists to prevent. A lowercased base58 address is not a quieter
+   * spelling of the same account; it is a string nobody holds a key for, and money sent there is
+   * gone. The database refuses it rather than storing it and watching an address that never pays.
+   */
+  it('refuses a lowercased TRON account', async () => {
+    await expectViolation(
+      insertPayment({ network: 'tron-nile', receivingAccount: TRON_ACCOUNT.toLowerCase() }),
+      CHECK_VIOLATION,
+    );
+  });
+
+  it('refuses an EVM account on a TRON network, and a TRON account on an EVM network', async () => {
+    await expectViolation(
+      insertPayment({ network: 'tron-nile', receivingAccount: ACCOUNT_ONE }),
+      CHECK_VIOLATION,
+    );
+    await expectViolation(
+      insertPayment({ network: 'polygon-amoy', receivingAccount: TRON_ACCOUNT }),
+      CHECK_VIOLATION,
+    );
+  });
+
+  it('still refuses a mixed-case EVM address', async () => {
+    await expectViolation(
+      insertPayment({ receivingAccount: asMixedCase(ACCOUNT_ONE) }),
+      CHECK_VIOLATION,
+    );
+  });
+
+  /**
+   * These three equal their own lowercase form, so the rule this replaced accepted every one of
+   * them. None is an address.
+   */
+  it.each([
+    ['too short', '0xabc'],
+    ['not hexadecimal', `0x${'z'.repeat(40)}`],
+    ['not an address at all', 'somewhere'],
+  ])(
+    'refuses an EVM account that is %s, which the lowercase rule accepted',
+    async (_label, account) => {
+      await expectViolation(insertPayment({ receivingAccount: account }), CHECK_VIOLATION);
+    },
+  );
+
+  it('accepts the native sentinel as an asset but never as an account', async () => {
+    // Its own account, because one address serves one payment per network by unique index.
+    const id = await insertPayment({ assetReference: 'native', receivingAccount: ACCOUNT_TWO });
+    expect(id).toBeTruthy();
+    await expectViolation(insertPayment({ receivingAccount: 'native' }), CHECK_VIOLATION);
+  });
+
+  /**
+   * Environment separation is now derived from the network rather than enumerated, so adding a
+   * network cannot silently make it reachable from the wrong kind of key.
+   */
+  it('keeps a test key incapable of writing a live network row', async () => {
+    await expectViolation(
+      insertPayment({ environment: 'test', network: 'tron-mainnet' }),
+      CHECK_VIOLATION,
+    );
+    await expectViolation(
+      insertPayment({ environment: 'live', network: 'tron-nile' }),
+      CHECK_VIOLATION,
+    );
+  });
+});
