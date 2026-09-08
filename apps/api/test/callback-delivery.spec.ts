@@ -399,3 +399,133 @@ describe('redelivering on an operator instruction', () => {
     expect(await repository.requeue(identifier, 'mch_someone_else', new Date())).toBeNull();
   });
 });
+
+async function attemptsOf(identifier: string) {
+  const result = await pool.query<{ attempt_number: number; outcome: string }>(
+    `SELECT attempt_number, outcome FROM webhook_delivery_attempts
+      WHERE delivery_id = $1 ORDER BY attempt_number`,
+    [identifier],
+  );
+  return result.rows;
+}
+
+/**
+ * What the merchant and the operator can see afterwards.
+ *
+ * A redelivery that sends the request and leaves no trace is worse than one that fails: the delivery
+ * log is the only place either party can check what was sent, and a button that appears to do
+ * nothing is a button people press repeatedly.
+ */
+describe('the record a redelivery leaves', () => {
+  it('records the new attempt without overwriting the ones before it', async () => {
+    respondWith = { status: 500, body: 'boom', headers: {} };
+    const identifier = await enqueue(receiverUrl());
+    const allowlist = [`localhost:${receiverPort.toString()}`];
+    await delivererFor(allowlist).execute();
+
+    respondWith = { status: 200, body: 'ok', headers: {} };
+    await new WebhookDeliveryRepository(pool).requeue(identifier, MERCHANT_ID, new Date());
+    await delivererFor(allowlist).execute();
+
+    expect(await attemptsOf(identifier)).toStrictEqual([
+      { attempt_number: 1, outcome: 'retryable' },
+      { attempt_number: 2, outcome: 'delivered' },
+    ]);
+  });
+
+  /**
+   * The age ceiling is measured from the start of the current cycle, not from the event. Measuring
+   * from the event would abandon a redelivery of anything older than the ceiling on its first
+   * attempt, which is exactly when a merchant most wants one.
+   */
+  it('delivers a redelivery of an event older than the retry ceiling', async () => {
+    respondWith = { status: 500, body: 'boom', headers: {} };
+    const identifier = await enqueue(receiverUrl());
+    const allowlist = [`localhost:${receiverPort.toString()}`];
+    await delivererFor(allowlist).execute();
+
+    await pool.query(
+      `UPDATE webhook_deliveries
+          SET created_at = now() - interval '30 days', cycle_started_at = now() - interval '30 days'
+        WHERE id = $1`,
+      [identifier],
+    );
+
+    respondWith = { status: 200, body: 'ok', headers: {} };
+    await new WebhookDeliveryRepository(pool).requeue(identifier, MERCHANT_ID, new Date());
+    await delivererFor(allowlist).execute();
+
+    expect(await statusOf(identifier)).toBe('delivered');
+  });
+
+  it('gives the redelivery the whole schedule again', async () => {
+    respondWith = { status: 500, body: 'boom', headers: {} };
+    const identifier = await enqueue(receiverUrl());
+    const allowlist = [`localhost:${receiverPort.toString()}`];
+    // One past the schedule, which is where it abandons: the last scheduled delay is spent by the
+    // attempt after it.
+    for (let attempt = 0; attempt <= TEST_RETRY_POLICY.delaysInSeconds.length; attempt += 1) {
+      await pool.query(
+        `UPDATE webhook_deliveries SET status = 'pending', next_attempt_at = now() WHERE id = $1`,
+        [identifier],
+      );
+      await delivererFor(allowlist).execute();
+    }
+    expect(await statusOf(identifier)).toBe('abandoned');
+
+    await new WebhookDeliveryRepository(pool).requeue(identifier, MERCHANT_ID, new Date());
+    await delivererFor(allowlist).execute();
+
+    const delivery = await readDelivery(identifier);
+    expect(delivery.status).toBe('failed');
+    expect(delivery.attempt_count).toBe(TEST_RETRY_POLICY.delaysInSeconds.length + 2);
+  });
+});
+
+/**
+ * A merchant with no active signing secret is an operator-side condition, not a refused destination.
+ * Abandoning would throw the event away for a cause that is fixed in seconds, so it is retried and
+ * the reason is recorded where both sides can read it.
+ */
+describe('a merchant with no signing secret', () => {
+  beforeEach(async () => {
+    await pool.query('UPDATE webhook_secrets SET retired_at = now() WHERE merchant_id = $1', [
+      MERCHANT_ID,
+    ]);
+  });
+
+  afterAll(async () => {
+    await pool.query('UPDATE webhook_secrets SET retired_at = NULL WHERE merchant_id = $1', [
+      MERCHANT_ID,
+    ]);
+  });
+
+  it('schedules another attempt instead of abandoning the event', async () => {
+    const identifier = await enqueue(receiverUrl());
+    const outcome = await delivererFor([`localhost:${receiverPort.toString()}`]).execute();
+
+    expect(outcome).toMatchObject({ claimed: 1, delivered: 0, retrying: 1, abandoned: 0 });
+    const delivery = await readDelivery(identifier);
+    expect(delivery.status).toBe('failed');
+    expect(delivery.last_failure).toBe('the merchant has no active signing secret');
+    expect(received).toHaveLength(0);
+  });
+
+  it('delivers once a secret exists again, with no operator action on the delivery', async () => {
+    const identifier = await enqueue(receiverUrl());
+    const allowlist = [`localhost:${receiverPort.toString()}`];
+    await delivererFor(allowlist).execute();
+
+    await pool.query('UPDATE webhook_secrets SET retired_at = NULL WHERE merchant_id = $1', [
+      MERCHANT_ID,
+    ]);
+    await pool.query(
+      `UPDATE webhook_deliveries SET status = 'pending', next_attempt_at = now() WHERE id = $1`,
+      [identifier],
+    );
+    await delivererFor(allowlist).execute();
+
+    expect(await statusOf(identifier)).toBe('delivered');
+    expect(received).toHaveLength(1);
+  });
+});

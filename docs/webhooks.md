@@ -81,7 +81,18 @@ dashboard and is worth checking if you are debugging a firewall.
 ## Sending one again
 
 If your receiver was down, `POST /v1/webhooks/deliveries/{id}/redeliver`, or press **Redeliver** in
-the dashboard. The `webhook-id` does not change, so your existing deduplication keeps working.
+the dashboard. The `webhook-id` does not change, so your existing deduplication keeps working — a
+receiver that already processed the event will recognise the repeat and can answer `200` without
+doing anything twice.
+
+A redelivery starts a fresh cycle: the whole retry schedule again, and the 72-hour ceiling measured
+from the moment you asked rather than from the original event. That is why redelivering something
+from last week works at all. The attempts already made stay in the history and the new ones are
+appended, so the delivery log shows every request ever sent for that event, in order.
+
+Redelivery is deliberately allowed for an event that was already delivered, not only for a failed
+one. A merchant whose own transaction rolled back after answering `200` needs the event again, and
+knows that better than we do.
 
 ## Rotating your secret
 
@@ -92,6 +103,10 @@ active secret: callbacks nobody can verify are worse than a stale secret that st
 
 **A secret is shown once, when it is created.** There is no endpoint that reads one back, because a
 value an API returns is a value that leaks through every log, proxy and screen share it passes.
+
+If you retire every secret, deliveries are not thrown away: they are retried on the ordinary schedule
+with `the merchant has no active signing secret` recorded against each attempt, and they go out by
+themselves once a secret exists again. The schedule still ends them, so create one before it does.
 
 ## Where we will and will not send
 

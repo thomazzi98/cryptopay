@@ -372,13 +372,29 @@ describe('sending a callback again', () => {
     expect(response.json<{ identifier: string }>().identifier).toBe(DELIVERY_ID);
   });
 
-  it('resets the attempt count so the full schedule is available again', async () => {
+  /**
+   * The schedule starts again without the attempt count being rewound. Rewinding it made the next
+   * attempt reuse an attempt number that already existed, and the attempt insert is
+   * ON CONFLICT DO NOTHING for crash safety, so the redelivery left no trace at all.
+   */
+  it('starts the schedule again while keeping the attempts already made', async () => {
     await post(`/v1/webhooks/deliveries/${DELIVERY_ID}/redeliver`);
-    const stored = await pool.query<{ attempt_count: number }>(
-      'SELECT attempt_count FROM webhook_deliveries WHERE id = $1',
+    const stored = await pool.query<{ attempt_count: number; schedule_offset: number }>(
+      'SELECT attempt_count, schedule_offset FROM webhook_deliveries WHERE id = $1',
       [DELIVERY_ID],
     );
-    expect(stored.rows[0]?.attempt_count).toBe(0);
+    const row = stored.rows[0];
+    expect(row?.attempt_count).toBe(row?.schedule_offset);
+  });
+
+  it('measures the retry ceiling from the redelivery rather than from the original event', async () => {
+    await post(`/v1/webhooks/deliveries/${DELIVERY_ID}/redeliver`);
+    const stored = await pool.query<{ started_after_creation: boolean }>(
+      `SELECT cycle_started_at > created_at AS started_after_creation
+         FROM webhook_deliveries WHERE id = $1`,
+      [DELIVERY_ID],
+    );
+    expect(stored.rows[0]?.started_after_creation).toBe(true);
   });
 
   it('keeps the attempts already recorded, because the history is the point', async () => {

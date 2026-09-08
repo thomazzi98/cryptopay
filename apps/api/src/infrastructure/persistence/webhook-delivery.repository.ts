@@ -24,7 +24,18 @@ export interface WebhookDelivery {
   /** Serialized at enqueue and transmitted byte for byte, because the signature covers these bytes. */
   readonly payload: string;
   readonly status: DeliveryStatus;
+  /**
+   * Every attempt ever made for this event, across redeliveries. It only ever rises, which is what
+   * keeps attempt numbers unique and the history complete.
+   */
   readonly attemptCount: number;
+  /**
+   * The attempt count when the current cycle began. The retry policy counts from here, so a
+   * redelivery gets the whole schedule again while the history keeps its earlier attempts.
+   */
+  readonly scheduleOffset: number;
+  /** When the current cycle began. The age ceiling is measured from this, not from createdAt. */
+  readonly cycleStartedAt: Date;
   readonly nextAttemptAt: Date;
   readonly deliveredAt: Date | null;
   readonly lastFailure: string | null;
@@ -41,6 +52,8 @@ interface DeliveryRow {
   readonly payload: string;
   readonly status: DeliveryStatus;
   readonly attempt_count: number;
+  readonly schedule_offset: number;
+  readonly cycle_started_at: Date;
   readonly next_attempt_at: Date;
   readonly delivered_at: Date | null;
   readonly last_failure: string | null;
@@ -58,6 +71,8 @@ function toDelivery(row: DeliveryRow): WebhookDelivery {
     payload: row.payload,
     status: row.status,
     attemptCount: row.attempt_count,
+    scheduleOffset: row.schedule_offset,
+    cycleStartedAt: row.cycle_started_at,
     nextAttemptAt: row.next_attempt_at,
     deliveredAt: row.delivered_at,
     lastFailure: row.last_failure,
@@ -66,7 +81,8 @@ function toDelivery(row: DeliveryRow): WebhookDelivery {
 }
 
 const DELIVERY_COLUMNS = `id, merchant_id, payment_id, environment, event_type, destination_url,
-  payload, status, attempt_count, next_attempt_at, delivered_at, last_failure, created_at`;
+  payload, status, attempt_count, schedule_offset, cycle_started_at, next_attempt_at, delivered_at,
+  last_failure, created_at`;
 
 export interface RecordedAttempt {
   readonly deliveryId: string;
@@ -248,10 +264,14 @@ export class WebhookDeliveryRepository {
     now: Date,
   ): Promise<WebhookDelivery | null> {
     const result = await this.pool.query<DeliveryRow>(
+      // A new cycle, not a new delivery: the identifier is unchanged, so the merchant recognises the
+      // repeat and deduplicates on it. attempt_count keeps rising so the attempts already made stay
+      // in the history, while the schedule and the age ceiling both start again from here.
       `UPDATE webhook_deliveries
           SET status = 'pending',
               next_attempt_at = $3,
-              attempt_count = 0,
+              schedule_offset = attempt_count,
+              cycle_started_at = $3,
               claimed_by = NULL,
               claim_expires_at = NULL,
               updated_at = now()
