@@ -31,6 +31,7 @@ import {
 import type { BlockCursorRepository } from '../infrastructure/persistence/block-cursor.repository.js';
 import type { EvaluationQueueRepository } from '../infrastructure/persistence/evaluation-queue.repository.js';
 import type { PaymentTransferRepository } from '../infrastructure/persistence/payment-transfer.repository.js';
+import type { RateLimitRepository } from '../infrastructure/persistence/rate-limit.repository.js';
 import type { SettlementRepository } from '../infrastructure/persistence/settlement.repository.js';
 import type { WebhookDeliveryRepository } from '../infrastructure/persistence/webhook-delivery.repository.js';
 import type { WebhookSecretRepository } from '../infrastructure/persistence/webhook-secret.repository.js';
@@ -60,6 +61,7 @@ export interface ServerDependencies {
   readonly ulidFactory: UlidFactory;
   readonly evaluationQueueRepository: EvaluationQueueRepository;
   readonly settlementRepository: SettlementRepository;
+  readonly rateLimitRepository: RateLimitRepository;
 }
 
 const MAXIMUM_SUPPLIED_REQUEST_ID_LENGTH = 128;
@@ -230,6 +232,11 @@ export function buildServer(dependencies: ServerDependencies): ApplicationServer
   const authenticate = createAuthenticationHook({
     merchantRepository,
     apiKeyPepper: configuration.apiKeyPepper,
+    rateLimitRepository: dependencies.rateLimitRepository,
+    rateLimit: {
+      requests: configuration.apiRateLimitRequests,
+      windowSeconds: configuration.apiRateLimitWindowSeconds,
+    },
   });
 
   registerHealthRoutes(server, {

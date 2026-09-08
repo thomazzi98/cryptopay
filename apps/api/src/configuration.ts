@@ -96,6 +96,8 @@ const ConfigurationSchema = z
     tronNileRpcUrls: z.array(z.url()).max(8).default([]),
     solanaMainnetRpcUrls: z.array(z.url()).max(8).default([]),
     solanaDevnetRpcUrls: z.array(z.url()).max(8).default([]),
+    apiRateLimitRequests: z.coerce.number().int().min(1).max(100_000).default(600),
+    apiRateLimitWindowSeconds: z.coerce.number().int().min(1).max(3600).default(60),
     localAnvilRpcUrls: z.array(z.url()).max(8).default([]),
 
     /**
@@ -254,6 +256,8 @@ export function loadConfiguration(source: EnvironmentSource): Configuration {
     tronNileRpcUrls: parseCommaSeparated(source.TRON_NILE_RPC_URLS),
     solanaMainnetRpcUrls: parseCommaSeparated(source.SOLANA_MAINNET_RPC_URLS),
     solanaDevnetRpcUrls: parseCommaSeparated(source.SOLANA_DEVNET_RPC_URLS),
+    apiRateLimitRequests: source.API_RATE_LIMIT_REQUESTS,
+    apiRateLimitWindowSeconds: source.API_RATE_LIMIT_WINDOW_SECONDS,
     localAnvilRpcUrls: parseCommaSeparated(source.LOCAL_ANVIL_RPC_URLS),
     polygonMainnetWalletRpcUrl: optionalText(source.POLYGON_MAINNET_WALLET_RPC_URL),
     polygonAmoyWalletRpcUrl: optionalText(source.POLYGON_AMOY_WALLET_RPC_URL),

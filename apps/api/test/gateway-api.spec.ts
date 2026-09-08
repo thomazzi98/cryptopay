@@ -148,6 +148,10 @@ beforeAll(async () => {
     DATABASE_URL: connectionUrlFor(isolated.databaseName, inject('postgresPort')),
     API_KEY_PEPPER: PEPPER,
     WALLET_KEY_ENCRYPTION_KEY: WALLET_KEY.toString('base64'),
+    // Generous, because this suite shares one key across every test. The budget itself is
+    // exercised by its own spec, which runs a server configured with a limit it can reach.
+    API_RATE_LIMIT_REQUESTS: '5000',
+    API_RATE_LIMIT_WINDOW_SECONDS: '60',
   });
   server = buildApplicationServer(configuration, pino({ level: 'silent' }), pool);
 

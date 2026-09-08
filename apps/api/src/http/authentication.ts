@@ -3,6 +3,7 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 
 import { apiKeySecretMatches, parseApiKey } from '../infrastructure/crypto/api-key.js';
 import type { MerchantRepository } from '../infrastructure/persistence/merchant.repository.js';
+import type { RateLimitRepository } from '../infrastructure/persistence/rate-limit.repository.js';
 import { ApplicationError } from './problem-details.js';
 
 /**
@@ -35,6 +36,8 @@ export type AuthenticationHook = (request: FastifyRequest, reply: FastifyReply) 
 export interface AuthenticationDependencies {
   readonly merchantRepository: MerchantRepository;
   readonly apiKeyPepper: string;
+  readonly rateLimitRepository: RateLimitRepository;
+  readonly rateLimit: { readonly requests: number; readonly windowSeconds: number };
 }
 
 const BEARER_PREFIX = 'Bearer ';
@@ -53,7 +56,7 @@ const UNAUTHORIZED_DETAIL =
 export function createAuthenticationHook(
   dependencies: AuthenticationDependencies,
 ): AuthenticationHook {
-  const { merchantRepository, apiKeyPepper } = dependencies;
+  const { merchantRepository, apiKeyPepper, rateLimitRepository, rateLimit } = dependencies;
 
   return async function authenticate(request: FastifyRequest, reply: FastifyReply): Promise<void> {
     const presented = readPresentedKey(request);
@@ -96,6 +99,26 @@ export function createAuthenticationHook(
     );
 
     reply.header('cryptopay-environment', record.environment);
+
+    // Counted after the key is known to be valid, so an unauthenticated flood cannot consume a real
+    // merchant's budget, and the counter is keyed on something an attacker cannot choose.
+    const budget = await rateLimitRepository.record(
+      record.id,
+      rateLimit.requests,
+      rateLimit.windowSeconds,
+    );
+    reply.header('ratelimit-limit', String(budget.limit));
+    reply.header('ratelimit-remaining', String(Math.max(0, budget.limit - budget.count)));
+    reply.header('ratelimit-reset', String(budget.retryAfterSeconds));
+    if (!budget.allowed) {
+      reply.header('retry-after', String(budget.retryAfterSeconds));
+      throw new ApplicationError(
+        'rate_limited',
+        'This API key has made too many requests. Retry after the window resets.',
+        [],
+        'RATE_LIMITED',
+      );
+    }
 
     // Recording usage must never fail a request, so it is fired without awaiting the result.
     void merchantRepository.recordKeyUsage(record.id).catch((error: unknown) => {

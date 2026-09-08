@@ -45,6 +45,7 @@ import { ObservedBlockRepository } from './infrastructure/persistence/observed-b
 import { PaymentRepository } from './infrastructure/persistence/payment.repository.js';
 import { PaymentTransferRepository } from './infrastructure/persistence/payment-transfer.repository.js';
 import { SettlementRepository } from './infrastructure/persistence/settlement.repository.js';
+import { RateLimitRepository } from './infrastructure/persistence/rate-limit.repository.js';
 import { WalletSeedRepository } from './infrastructure/persistence/wallet-seed.repository.js';
 import { WebhookDeliveryRepository } from './infrastructure/persistence/webhook-delivery.repository.js';
 import { WebhookSecretRepository } from './infrastructure/persistence/webhook-secret.repository.js';
@@ -127,6 +128,7 @@ export function buildApplicationServer(
   const webhookSecretRepository = new WebhookSecretRepository(databasePool);
   const evaluationQueueRepository = new EvaluationQueueRepository(databasePool);
   const settlementRepository = new SettlementRepository(databasePool);
+  const rateLimitRepository = new RateLimitRepository(databasePool);
 
   const walletAllocators = new WalletAllocatorProvider(
     walletSeedRepository,
@@ -175,6 +177,7 @@ export function buildApplicationServer(
     ulidFactory,
     evaluationQueueRepository,
     settlementRepository,
+    rateLimitRepository,
   });
 }
 
