@@ -260,6 +260,12 @@ export class EvmChainGateway implements ChainGateway {
    * contract rather than by a plain transaction does not appear in a block body, and is not seen
    * here. Reconciliation compares the destination balance against the credited total, which is what
    * notices one.
+   *
+   * A height the endpoint will not serve is allowed to throw rather than be skipped. Skipping it
+   * returned a successful scan for a window one of whose blocks was never read, and the cursor
+   * advanced past it, so a native payment in that block was missed permanently and silently. Every
+   * height in an EVM range exists; an endpoint refusing one is an endpoint problem, not a property
+   * of the chain, and this project halts on an anomaly rather than guessing through it.
    */
   private async scanNativeTransfers(
     request: TransferScanRequest,
@@ -268,26 +274,10 @@ export class EvmChainGateway implements ChainGateway {
     const transfers: ObservedTransfer[] = [];
 
     for (let height = request.fromHeight; height <= request.toHeight; height += 1n) {
-      const block = await this.readBlockWithTransactions(height);
-      if (block === null) {
-        continue;
-      }
+      const block = await this.client.getBlock({ blockNumber: height, includeTransactions: true });
       transfers.push(...(await this.creditsInBlock(block, watched)));
     }
     return transfers;
-  }
-
-  private async readBlockWithTransactions(height: bigint) {
-    try {
-      return await this.client.getBlock({ blockNumber: height, includeTransactions: true });
-    } catch (error) {
-      if (isTransportFailure(error)) {
-        throw error;
-      }
-      // A height the endpoint will not serve is skipped rather than treated as an outage; the
-      // cursor does not advance past a window that threw, so nothing is silently missed.
-      return null;
-    }
   }
 
   private async creditsInBlock(
