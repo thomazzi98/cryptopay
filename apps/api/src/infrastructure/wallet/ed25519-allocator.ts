@@ -34,7 +34,11 @@ export function allocateSolanaDestination(
 ): PaymentDestination {
   assertDerivationIndex(derivationIndex);
 
-  const derived = deriveHardenedPath(new Uint8Array(seed), [
+  // A copy, because the caller owns the Buffer it passed and zeroes that one itself. This copy is
+  // ours to clear, and leaving it behind would put the seed in memory for the process lifetime
+  // however carefully the caller cleaned up after itself.
+  const seedBytes = Uint8Array.from(seed);
+  const derived = deriveHardenedPath(seedBytes, [
     PURPOSE_INDEX,
     COIN_TYPES.solana,
     derivationIndex,
@@ -46,6 +50,7 @@ export function allocateSolanaDestination(
       allocationReference: `${ACCOUNT_PATH_PREFIX}/${derivationIndex}'/${CHANGE_INDEX}'`,
     });
   } finally {
+    seedBytes.fill(0);
     derived.privateKey.fill(0);
     derived.chainCode.fill(0);
   }

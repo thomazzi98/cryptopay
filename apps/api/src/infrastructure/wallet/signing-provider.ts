@@ -73,10 +73,13 @@ export class WalletSigningProvider {
     }
 
     const seed = openSeed(sealed, environment, this.wrappers);
+    // Copied because `fromMasterSeed` takes a Uint8Array, and zeroed alongside the original below:
+    // clearing only the Buffer would leave the same bytes reachable through the copy.
+    const seedBytes = Uint8Array.from(seed);
     let master: HDKey | null = null;
     let child: HDKey | null = null;
     try {
-      master = HDKey.fromMasterSeed(new Uint8Array(seed));
+      master = HDKey.fromMasterSeed(seedBytes);
       child = master.derive(pathFor(path));
       const privateKey = child.privateKey;
       if (privateKey === null) {
@@ -88,6 +91,7 @@ export class WalletSigningProvider {
     } finally {
       child?.wipePrivateData();
       master?.wipePrivateData();
+      seedBytes.fill(0);
       zeroBuffer(seed);
     }
   }

@@ -69,12 +69,16 @@ export class HierarchicalDeterministicAllocator {
 
   constructor(seed: Buffer, family: Secp256k1Family) {
     this.profile = PROFILES[family];
-    const master = HDKey.fromMasterSeed(new Uint8Array(seed));
+    // A copy, because the caller owns the Buffer it passed. Zeroed below for the same reason the
+    // derived keys are: a seed left in memory outlives every other precaution taken over it.
+    const seedBytes = Uint8Array.from(seed);
+    const master = HDKey.fromMasterSeed(seedBytes);
     const account = master.derive(this.profile.accountPath);
 
     // Keeping only the public half means this object cannot sign, however it is later misused.
     this.accountKey = account.wipePrivateData();
     master.wipePrivateData();
+    seedBytes.fill(0);
   }
 
   allocate(derivationIndex: number): PaymentDestination {

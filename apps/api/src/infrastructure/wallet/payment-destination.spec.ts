@@ -298,3 +298,40 @@ describe('destinations across families', () => {
     expect(() => allocateSolanaDestination(seed, derivationIndex)).toThrow(AddressAllocationError);
   });
 });
+
+/**
+ * The provider zeroes the seed it opened as soon as the allocator is built, so an allocator that
+ * kept a reference to that buffer rather than a copy would derive from sixty-four zero bytes on
+ * every later use. These assert the contract that makes the zeroing safe.
+ */
+describe('what an allocator does to the seed it is handed', () => {
+  it.each<Secp256k1Family>(['polygon', 'tron'])('leaves the caller seed intact on %s', (family) => {
+    const seed = seedFor(WELL_KNOWN_MNEMONIC);
+    const untouched = Buffer.from(seed);
+    const allocator = new HierarchicalDeterministicAllocator(seed, family);
+
+    expect(seed.equals(untouched)).toBe(true);
+    expect(allocator.allocate(0).account).toBe(
+      new HierarchicalDeterministicAllocator(untouched, family).allocate(0).account,
+    );
+  });
+
+  it('leaves the caller seed intact on solana', () => {
+    const seed = seedFor(WELL_KNOWN_MNEMONIC);
+    const untouched = Buffer.from(seed);
+    const first = allocateSolanaDestination(seed, 0).account;
+
+    expect(seed.equals(untouched)).toBe(true);
+    expect(allocateSolanaDestination(seed, 0).account).toBe(first);
+  });
+
+  it('keeps deriving correctly after the seed it was built from is zeroed', () => {
+    const seed = seedFor(WELL_KNOWN_MNEMONIC);
+    const expected = new HierarchicalDeterministicAllocator(seed, 'tron').allocate(4).account;
+
+    const allocator = new HierarchicalDeterministicAllocator(seed, 'tron');
+    seed.fill(0);
+
+    expect(allocator.allocate(4).account).toBe(expected);
+  });
+});
