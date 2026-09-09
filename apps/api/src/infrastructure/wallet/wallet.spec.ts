@@ -4,10 +4,7 @@ import { mnemonicToSeedSync } from '@scure/bip39';
 import { getAddress } from 'viem';
 import { describe, expect, it } from 'vitest';
 
-import {
-  AddressAllocationError,
-  HierarchicalDeterministicAllocator,
-} from './hierarchical-deterministic-allocator.js';
+import { HierarchicalDeterministicAllocator } from './hierarchical-deterministic-allocator.js';
 import {
   createKeyWrapperRegistry,
   createLocalKeyWrapper,
@@ -17,6 +14,7 @@ import {
   zeroBuffer,
 } from './key-wrapping.js';
 import { additionalDataFor, generateMasterSeed, openSeed, sealSeed } from './master-seed.js';
+import { AddressAllocationError } from './payment-destination.js';
 
 /**
  * The seed is the single most valuable secret in the system, and address allocation is the hottest
@@ -199,37 +197,46 @@ describe('address allocation', () => {
   it.each(WELL_KNOWN_ADDRESSES.map((account, index) => ({ index, account })))(
     'derives the published address at index $index',
     ({ index, account }) => {
-      const allocator = new HierarchicalDeterministicAllocator(seedFor(WELL_KNOWN_MNEMONIC));
+      const allocator = new HierarchicalDeterministicAllocator(
+        seedFor(WELL_KNOWN_MNEMONIC),
+        'polygon',
+      );
       expect(allocator.allocate(index).account).toBe(account);
     },
   );
 
   it('returns addresses already lowercased for storage', () => {
-    const allocator = new HierarchicalDeterministicAllocator(seedFor(WELL_KNOWN_MNEMONIC));
+    const allocator = new HierarchicalDeterministicAllocator(
+      seedFor(WELL_KNOWN_MNEMONIC),
+      'polygon',
+    );
     const allocated = allocator.allocate(0);
     expect(allocated.account).toBe(allocated.account.toLowerCase());
     expect(getAddress(allocated.account).toLowerCase()).toBe(allocated.account);
   });
 
   it('records the derivation path so a sweep can find the key again', () => {
-    const allocator = new HierarchicalDeterministicAllocator(seedFor(WELL_KNOWN_MNEMONIC));
+    const allocator = new HierarchicalDeterministicAllocator(
+      seedFor(WELL_KNOWN_MNEMONIC),
+      'polygon',
+    );
     expect(allocator.allocate(417).allocationReference).toBe("m/44'/60'/0'/0/417");
   });
 
   it('is deterministic for one seed', () => {
-    const first = new HierarchicalDeterministicAllocator(seedFor(WELL_KNOWN_MNEMONIC));
-    const second = new HierarchicalDeterministicAllocator(seedFor(WELL_KNOWN_MNEMONIC));
+    const first = new HierarchicalDeterministicAllocator(seedFor(WELL_KNOWN_MNEMONIC), 'polygon');
+    const second = new HierarchicalDeterministicAllocator(seedFor(WELL_KNOWN_MNEMONIC), 'polygon');
     expect(first.allocate(42).account).toBe(second.allocate(42).account);
   });
 
   it('produces unrelated addresses from a different seed', () => {
-    const one = new HierarchicalDeterministicAllocator(generateMasterSeed());
-    const other = new HierarchicalDeterministicAllocator(generateMasterSeed());
+    const one = new HierarchicalDeterministicAllocator(generateMasterSeed(), 'polygon');
+    const other = new HierarchicalDeterministicAllocator(generateMasterSeed(), 'polygon');
     expect(one.allocate(0).account).not.toBe(other.allocate(0).account);
   });
 
   it('issues a distinct address for every index', () => {
-    const allocator = new HierarchicalDeterministicAllocator(generateMasterSeed());
+    const allocator = new HierarchicalDeterministicAllocator(generateMasterSeed(), 'polygon');
     const accounts = new Set(
       Array.from({ length: 200 }, (value, index) => allocator.allocate(index).account),
     );
@@ -237,12 +244,12 @@ describe('address allocation', () => {
   });
 
   it.each([-1, 1.5, 2_147_483_648, NaN])('rejects the index %s', (index) => {
-    const allocator = new HierarchicalDeterministicAllocator(generateMasterSeed());
+    const allocator = new HierarchicalDeterministicAllocator(generateMasterSeed(), 'polygon');
     expect(() => allocator.allocate(index)).toThrow(AddressAllocationError);
   });
 
   it('accepts the highest non-hardened index', () => {
-    const allocator = new HierarchicalDeterministicAllocator(generateMasterSeed());
+    const allocator = new HierarchicalDeterministicAllocator(generateMasterSeed(), 'polygon');
     expect(allocator.allocate(2_147_483_647).account).toMatch(/^0x[\da-f]{40}$/);
   });
 
@@ -251,13 +258,13 @@ describe('address allocation', () => {
    * signing. The allocator keeps only the account-level public key.
    */
   it('holds no private key, so the creation path cannot sign', () => {
-    const allocator = new HierarchicalDeterministicAllocator(generateMasterSeed());
+    const allocator = new HierarchicalDeterministicAllocator(generateMasterSeed(), 'polygon');
     const accountKey = (allocator as unknown as { accountKey: { privateKey: unknown } }).accountKey;
     expect(accountKey.privateKey).toBeNull();
   });
 
   it('derives children that also carry no private key', () => {
-    const allocator = new HierarchicalDeterministicAllocator(generateMasterSeed());
+    const allocator = new HierarchicalDeterministicAllocator(generateMasterSeed(), 'polygon');
     const accountKey = (
       allocator as unknown as {
         accountKey: { deriveChild: (index: number) => { privateKey: unknown } };

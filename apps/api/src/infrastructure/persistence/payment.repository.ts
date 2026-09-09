@@ -7,7 +7,7 @@ import type {
 import type { Pool, PoolClient } from 'pg';
 
 import type { Payment } from '../../domain/payment.js';
-import type { AllocatedPaymentAddress } from '../wallet/hierarchical-deterministic-allocator.js';
+import type { PaymentDestination } from '../wallet/payment-destination.js';
 
 /**
  * Persistence for the payment aggregate.
@@ -155,7 +155,7 @@ export interface SaveTransitionInput {
 
 export interface CreatePaymentRecord {
   readonly payment: Payment;
-  readonly address: AllocatedPaymentAddress;
+  readonly address: PaymentDestination;
   readonly addressIdentifier: string;
   readonly derivationIndex: number;
   /** Runs inside the same transaction, so the stored response cannot exist without the payment. */

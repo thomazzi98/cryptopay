@@ -145,7 +145,8 @@ export function buildApplicationServer(
     paymentRepository,
     walletSeedRepository,
     blockCursorRepository,
-    allocatorFor: (environment) => walletAllocators.allocatorFor(environment),
+    allocateDestination: (environment, family, derivationIndex) =>
+      walletAllocators.destinationFor(environment, family, derivationIndex),
     ulidFactory,
     now: () => new Date(),
     randomToken: () => randomBytes(CHECKOUT_TOKEN_BYTES).toString('base64url'),

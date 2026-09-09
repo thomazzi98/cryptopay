@@ -227,7 +227,7 @@ beforeAll(async () => {
     ENVIRONMENT,
     sealSeed(seed, ENVIRONMENT, wrapper),
   );
-  allocator = new HierarchicalDeterministicAllocator(seed);
+  allocator = new HierarchicalDeterministicAllocator(seed, 'polygon');
 
   const signingProvider = new WalletSigningProvider(
     seedRepository,

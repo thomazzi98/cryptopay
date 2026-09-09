@@ -3,6 +3,7 @@ import {
   parseAmountToBaseUnits,
   type CreatePaymentRequest,
   type Environment,
+  type NetworkFamily,
   type NetworkIdentifier,
 } from '@cryptopay/shared';
 import type { PoolClient } from 'pg';
@@ -23,7 +24,7 @@ import {
   type PaymentRepository,
 } from '../infrastructure/persistence/payment.repository.js';
 import type { WalletSeedRepository } from '../infrastructure/persistence/wallet-seed.repository.js';
-import type { HierarchicalDeterministicAllocator } from '../infrastructure/wallet/hierarchical-deterministic-allocator.js';
+import type { PaymentDestination } from '../infrastructure/wallet/payment-destination.js';
 import type { UlidFactory } from '../infrastructure/system/ulid.js';
 
 /**
@@ -48,7 +49,16 @@ export interface CreatePaymentDependencies {
   readonly paymentRepository: PaymentRepository;
   readonly walletSeedRepository: WalletSeedRepository;
   readonly blockCursorRepository: BlockCursorRepository;
-  readonly allocatorFor: (environment: Environment) => Promise<HierarchicalDeterministicAllocator>;
+  /**
+   * Issues the address this payment is paid to. Takes the family so each chain gets a destination in
+   * its own encoding, derived under its own registered coin type, rather than an EVM address that
+   * only Polygon could ever receive on.
+   */
+  readonly allocateDestination: (
+    environment: Environment,
+    family: NetworkFamily,
+    derivationIndex: number,
+  ) => Promise<PaymentDestination>;
   readonly ulidFactory: UlidFactory;
   readonly now: () => Date;
   readonly randomToken: () => string;
@@ -150,8 +160,11 @@ export class CreatePaymentUseCase {
 
     const derivationIndex =
       await this.dependencies.walletSeedRepository.nextDerivationIndex(environment);
-    const allocator = await this.dependencies.allocatorFor(environment);
-    const address = allocator.allocate(derivationIndex);
+    const address = await this.dependencies.allocateDestination(
+      environment,
+      configuration.networkFamily,
+      derivationIndex,
+    );
 
     const createdAt = this.dependencies.now();
     const identifier = `pay_${this.dependencies.ulidFactory.create(createdAt.getTime())}`;
