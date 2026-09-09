@@ -1,4 +1,11 @@
-import type { Environment, GatewayError, GatewayPayment, NetworkFamily } from '@cryptopay/shared';
+import {
+  buildPaymentUri,
+  type Checkout,
+  type Environment,
+  type GatewayError,
+  type GatewayPayment,
+  type NetworkFamily,
+} from '@cryptopay/shared';
 import { base58 } from '@scure/base';
 import type { Pool } from 'pg';
 import { pino } from 'pino';
@@ -314,4 +321,54 @@ describe('destinations across every family', () => {
     expect(response.statusCode).toBe(422);
     expect(response.json<GatewayError>().error.code).toBe('UNSUPPORTED_CURRENCY');
   });
+});
+
+/**
+ * The hosted checkout and the gateway API must offer the same payment URI, because they are the
+ * same payment. This asserts the property that makes that true: the public checkout carries enough
+ * of the payment to rebuild the URI through the shared builder, and the result is byte identical to
+ * the one the API published.
+ *
+ * The checkout used to carry a second builder of its own, which emitted an EIP-681 token transfer
+ * for every payment. A customer paying in the chain's own currency was shown a QR asking their
+ * wallet to call `transfer` on a contract that does not exist, and TRON and Solana had no branch at
+ * all.
+ */
+describe('one payment URI, whichever surface asks for it', () => {
+  it.each(
+    FAMILIES.flatMap((expectation) =>
+      [expectation.nativeCurrency, expectation.tokenCurrency].map((currency) => ({
+        family: expectation.family,
+        currency,
+      })),
+    ),
+  )(
+    'agrees between the checkout and the API for $family $currency',
+    async ({ family, currency }) => {
+      const created = await create(family, currency);
+      const payment = created.json<GatewayPayment>();
+      const token = await pool.query<{ checkout_token: string }>(
+        'SELECT checkout_token FROM payments WHERE id = $1',
+        [payment.id],
+      );
+
+      const viewed = await server.inject({
+        method: 'GET',
+        url: `/v1/checkout/${token.rows[0]?.checkout_token ?? ''}`,
+      });
+      const checkout = viewed.json<Checkout>();
+      const rebuilt = buildPaymentUri({
+        networkFamily: checkout.networkFamily as NetworkFamily,
+        evmChainId: checkout.chainIdentifier,
+        destinationAccount: checkout.receivingAccount,
+        assetReference: checkout.asset.reference,
+        assetDecimals: checkout.asset.decimals,
+        amountInBaseUnits: checkout.requestedAmount.baseUnits,
+        memo: null,
+      });
+
+      expect(viewed.statusCode).toBe(200);
+      expect(rebuilt).toBe(payment.paymentUri);
+    },
+  );
 });

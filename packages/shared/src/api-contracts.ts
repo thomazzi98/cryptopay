@@ -318,6 +318,10 @@ export const CheckoutSchema = z
   .object({
     status: PaymentStatusSchema,
     network: NetworkIdentifierSchema,
+    networkFamily: NetworkFamilySchema.meta({
+      description:
+        'Which payment URI standard this network answers to. Stated rather than inferred from the network name, so the checkout draws EIP-681, Solana Pay or the TRON convention without carrying a table of its own.',
+    }),
     chainIdentifier: z.number().int().positive().nullable().meta({
       description:
         'The EVM chain id, or null on a network whose family has no numeric chain identity. TRON and Solana identify themselves by a genesis or first-block reference instead.',

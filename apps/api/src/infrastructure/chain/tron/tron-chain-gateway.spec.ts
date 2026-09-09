@@ -1,10 +1,10 @@
+import { NATIVE_ASSET_REFERENCE } from '@cryptopay/shared';
 import { describe, expect, it } from 'vitest';
 
 import {
   LedgerIdentityMismatchError,
   LedgerRangeTooWideError,
 } from '../../../application/ports/chain-gateway.port.js';
-import { NATIVE_ASSET_REFERENCE } from '../token-registry.js';
 import { decodeTronAddress } from './address.js';
 import { TronChainGateway } from './tron-chain-gateway.js';
 import type {

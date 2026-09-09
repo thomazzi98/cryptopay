@@ -6,6 +6,7 @@ import type {
   NetworkIdentifier,
   ObservedTransfer,
 } from '@cryptopay/shared';
+import { NATIVE_ASSET_REFERENCE } from '@cryptopay/shared';
 
 import {
   LedgerIdentityMismatchError,
@@ -17,7 +18,6 @@ import {
   type TransferScanRequest,
   type TransferScanResult,
 } from '../../../application/ports/chain-gateway.port.js';
-import { NATIVE_ASSET_REFERENCE } from '../token-registry.js';
 import type {
   SolanaBlock,
   SolanaNativeDelta,

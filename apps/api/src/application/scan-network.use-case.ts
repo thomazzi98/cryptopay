@@ -1,7 +1,10 @@
-import type { LedgerHeader, NetworkIdentifier } from '@cryptopay/shared';
+import {
+  NATIVE_ASSET_REFERENCE,
+  type LedgerHeader,
+  type NetworkIdentifier,
+} from '@cryptopay/shared';
 
 import { classifyTransfer } from '../domain/transfer-ledger.js';
-import { NATIVE_ASSET_REFERENCE } from '../infrastructure/chain/token-registry.js';
 import { networkConfigurationFor } from '../infrastructure/chain/network-configuration.js';
 import type { BlockCursor } from '../infrastructure/persistence/block-cursor.repository.js';
 import type { BlockCursorRepository } from '../infrastructure/persistence/block-cursor.repository.js';

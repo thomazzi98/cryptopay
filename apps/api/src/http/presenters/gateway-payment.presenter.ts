@@ -1,4 +1,5 @@
 import {
+  buildPaymentUri,
   formatBaseUnits,
   toPublicPaymentState,
   type GatewayPayment,
@@ -12,7 +13,6 @@ import {
   explorerTransactionUrl,
   networkConfigurationFor,
 } from '../../infrastructure/chain/network-configuration.js';
-import { buildPaymentUri } from '../../infrastructure/chain/payment-uri.js';
 import { renderPaymentQrCode } from '../../infrastructure/qr/qr-code.js';
 import type { StoredTransfer } from '../../infrastructure/persistence/payment-transfer.repository.js';
 

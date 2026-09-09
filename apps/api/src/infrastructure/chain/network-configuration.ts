@@ -1,4 +1,4 @@
-import { NATIVE_ASSET_REFERENCE, TOKEN_REGISTRY } from './token-registry.js';
+import { TOKEN_REGISTRY } from './token-registry.js';
 import {
   SOLANA_DEVNET_EXPLORER_BASE_URL,
   SOLANA_DEVNET_GENESIS_IDENTITY,
@@ -12,6 +12,7 @@ import {
   TRON_NATIVE_CURRENCY_SYMBOL,
   TRON_NILE_EXPLORER_BASE_URL,
   TRON_NILE_GENESIS_IDENTITY,
+  NATIVE_ASSET_REFERENCE,
 } from '@cryptopay/shared';
 import {
   LOCAL_ANVIL_CHAIN_IDENTIFIER,

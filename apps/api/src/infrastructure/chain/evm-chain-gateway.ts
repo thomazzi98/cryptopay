@@ -7,6 +7,7 @@ import {
   type LedgerPosition,
   type NetworkIdentifier,
   type ObservedTransfer,
+  NATIVE_ASSET_REFERENCE,
 } from '@cryptopay/shared';
 import {
   createPublicClient,
@@ -23,7 +24,6 @@ import {
   type PublicClient,
 } from 'viem';
 
-import { NATIVE_ASSET_REFERENCE } from './token-registry.js';
 import {
   LedgerIdentityMismatchError,
   LedgerRangeTooWideError,

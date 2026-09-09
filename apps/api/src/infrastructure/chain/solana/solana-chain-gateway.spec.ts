@@ -1,12 +1,12 @@
 import { createServer } from 'node:http';
 
+import { NATIVE_ASSET_REFERENCE } from '@cryptopay/shared';
 import { describe, expect, it } from 'vitest';
 
 import {
   LedgerIdentityMismatchError,
   LedgerRangeTooWideError,
 } from '../../../application/ports/chain-gateway.port.js';
-import { NATIVE_ASSET_REFERENCE } from '../token-registry.js';
 import { SolanaChainGateway } from './solana-chain-gateway.js';
 import {
   decodeSolanaBlock,

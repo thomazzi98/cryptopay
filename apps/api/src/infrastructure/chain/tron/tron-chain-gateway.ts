@@ -6,6 +6,7 @@ import {
   type LedgerPosition,
   type NetworkIdentifier,
   type ObservedTransfer,
+  NATIVE_ASSET_REFERENCE,
 } from '@cryptopay/shared';
 
 import {
@@ -18,7 +19,6 @@ import {
   type TransferScanRequest,
   type TransferScanResult,
 } from '../../../application/ports/chain-gateway.port.js';
-import { NATIVE_ASSET_REFERENCE } from '../token-registry.js';
 import { encodeTronAddress, tronAddressFromLogValue } from './address.js';
 import {
   TronTransportError,

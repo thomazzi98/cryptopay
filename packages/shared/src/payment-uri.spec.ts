@@ -1,18 +1,18 @@
 import { describe, expect, it } from 'vitest';
 
-import { renderPaymentQrCode } from '../qr/qr-code.js';
-import { decodeQrCode } from '../qr/qr-decoder.test-helper.js';
 import {
   buildPaymentUri,
+  NATIVE_ASSET_REFERENCE,
   UnsupportedPaymentUriError,
   type PaymentUriRequest,
 } from './payment-uri.js';
-import { NATIVE_ASSET_REFERENCE } from './token-registry.js';
 
 /**
- * Every case here is built from the real builder and then scanned back out of a real QR image, so a
- * change to a builder breaks the decode assertion rather than quietly shipping a URI no wallet can
- * read. Asserting the string alone would only prove the builder agrees with itself.
+ * The one builder both the API and the hosted checkout draw their payment URI from.
+ *
+ * Three standards with nothing in common beyond being URIs, so each family is asserted against the
+ * specification it answers to rather than against the shape of its neighbour. That the resulting
+ * string survives a real QR image is asserted beside the renderer, which is where the renderer is.
  *
  * The addresses are real: Circle USDC on Polygon and Solana, Tether on TRON.
  */
@@ -117,39 +117,6 @@ describe('the URI each family understands', () => {
  * The acceptance criterion the brief states directly: QR generation is not complete until all three
  * networks pass, for native and token alike, and the QR must decode back to the expected URI.
  */
-describe('scanning the QR code back', () => {
-  it.each([
-    ['Polygon, USDC', POLYGON_TOKEN],
-    ['Polygon, native POL', POLYGON_NATIVE],
-    ['TRON, USDT', TRON_TOKEN],
-    ['TRON, native TRX', TRON_NATIVE],
-    ['Solana, USDC', SOLANA_TOKEN],
-    ['Solana, native SOL', SOLANA_NATIVE],
-  ])('recovers exactly the URI the builder produced for %s', (_label, input) => {
-    const uri = buildPaymentUri(input);
-    const decoded = decodeQrCode(renderPaymentQrCode(uri).bytes);
-
-    expect(decoded).toBe(uri);
-    // The three facts a customer's money depends on, read back out of the image itself.
-    expect(decoded).toContain(input.destinationAccount);
-    expect(decoded).toContain(
-      input.networkFamily === 'solana' ? 'amount=' : input.amountInBaseUnits,
-    );
-    // A native payment names no contract, so there is nothing to look for. Written as a value
-    // rather than a branch, because an assertion inside a condition is one that can quietly stop
-    // running.
-    const contractInTheUri =
-      input.assetReference === NATIVE_ASSET_REFERENCE ? '' : input.assetReference;
-    expect(decoded ?? '').toContain(contractInTheUri);
-  });
-
-  it('carries base58 through the image with its case intact', () => {
-    const decoded = decodeQrCode(renderPaymentQrCode(buildPaymentUri(TRON_TOKEN)).bytes);
-    expect(decoded).toContain(TRON_USDT);
-    expect(decoded).not.toContain(TRON_USDT.toLowerCase());
-  });
-});
-
 describe('what a builder refuses rather than fakes', () => {
   it('refuses an EVM URI with no chain to name', () => {
     expect(() => buildPaymentUri(request({ evmChainId: null }))).toThrow(

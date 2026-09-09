@@ -1,6 +1,12 @@
-import { formatBaseUnits, type NetworkFamily } from '@cryptopay/shared';
+import { formatBaseUnits } from './money.js';
+import type { NetworkFamily } from './network-descriptor.js';
 
-import { NATIVE_ASSET_REFERENCE } from './token-registry.js';
+/**
+ * What a native currency carries instead of a contract address. Native payments have no contract to
+ * name, and every layer that matches on an asset needs one value that unambiguously means "the
+ * chain's own currency" rather than an empty string that reads as missing data.
+ */
+export const NATIVE_ASSET_REFERENCE = 'native';
 
 /**
  * The request a wallet reads when it scans a payment.

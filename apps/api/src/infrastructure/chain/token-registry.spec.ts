@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
 import { networkConfigurationFor, networksForEnvironment } from './network-configuration.js';
+import { NATIVE_ASSET_REFERENCE } from '@cryptopay/shared';
+
 import {
-  NATIVE_ASSET_REFERENCE,
   registeredTokensFor,
   resolveToken,
   TOKEN_REGISTRY,

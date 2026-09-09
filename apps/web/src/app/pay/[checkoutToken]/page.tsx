@@ -1,9 +1,10 @@
+import { buildPaymentUri, UnsupportedPaymentUriError } from '@cryptopay/shared';
 import type { Metadata } from 'next';
 
 import { Card, ErrorState } from '@/components/ui/surfaces';
 
 import { CheckoutLive } from './_checkout/checkout-live';
-import { buildTokenTransferUri } from './_checkout/payment-uri';
+import type { CheckoutView } from './_checkout/checkout-view';
 import { readCheckout } from './_checkout/read-checkout';
 import { ScanToPay } from './_checkout/scan-to-pay';
 
@@ -18,6 +19,30 @@ import { ScanToPay } from './_checkout/scan-to-pay';
  */
 
 export const metadata: Metadata = { title: 'Checkout' };
+
+/**
+ * Returns null rather than throwing when a family has no URI standard to draw, because a checkout
+ * that cannot offer a deep link is still a checkout: the address and the amount are on the page and
+ * a customer can pay by hand.
+ */
+function buildCheckoutUri(checkout: CheckoutView): string | null {
+  try {
+    return buildPaymentUri({
+      networkFamily: checkout.networkFamily,
+      evmChainId: checkout.chainIdentifier,
+      destinationAccount: checkout.receivingAccount,
+      assetReference: checkout.asset.reference,
+      assetDecimals: checkout.asset.decimals,
+      amountInBaseUnits: checkout.requestedAmount.baseUnits,
+      memo: null,
+    });
+  } catch (error) {
+    if (error instanceof UnsupportedPaymentUriError) {
+      return null;
+    }
+    throw error;
+  }
+}
 
 export default async function CheckoutPage({
   params,
@@ -38,16 +63,11 @@ export default async function CheckoutPage({
   }
 
   const checkout = result.checkout;
-  // EIP-681 names the chain by number, so the URI exists only where the network has one.
-  const paymentUri =
-    checkout.chainIdentifier === null
-      ? null
-      : buildTokenTransferUri({
-          tokenAddress: checkout.asset.reference,
-          chainIdentifier: checkout.chainIdentifier,
-          recipient: checkout.receivingAccount,
-          amountInBaseUnits: checkout.requestedAmount.baseUnits,
-        });
+  // The same builder the API draws its own QR from. This page used to carry a second one that
+  // emitted an EIP-681 token transfer for every payment, which asked a wallet to call `transfer` on
+  // a contract that does not exist whenever the payment was in the chain's own currency, and had no
+  // idea Solana Pay or TRON existed at all.
+  const paymentUri = buildCheckoutUri(checkout);
 
   return (
     <main className="mx-auto w-full max-w-lg px-4 py-6 sm:px-6 sm:py-10">

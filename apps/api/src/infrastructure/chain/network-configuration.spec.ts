@@ -1,4 +1,5 @@
 import {
+  buildPaymentUri,
   CAPABILITY_NAMES,
   isCanonicalAccount,
   NETWORK_FAMILIES,
@@ -12,7 +13,6 @@ import { describe, expect, it } from 'vitest';
 
 import { renderPaymentQrCode } from '../qr/qr-code.js';
 import { decodeQrCode } from '../qr/qr-decoder.test-helper.js';
-import { buildPaymentUri } from './payment-uri.js';
 import {
   explorerAccountUrl,
   explorerTransactionUrl,

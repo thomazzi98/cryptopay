@@ -13,6 +13,7 @@ export * from './money.js';
 export * from './network-descriptor.js';
 export * from './openapi.js';
 export * from './payment-state-machine.js';
+export * from './payment-uri.js';
 export * from './payment-status.js';
 export * from './payment-transition-table.js';
 export * from './public-payment-state.js';

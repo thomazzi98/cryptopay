@@ -8,6 +8,7 @@ import {
   USDT_TRON_NILE_ADDRESS,
   type AddressForm,
   type NetworkIdentifier,
+  NATIVE_ASSET_REFERENCE,
 } from '@cryptopay/shared';
 
 /**
@@ -24,9 +25,6 @@ import {
  * that matched on symbol would credit the wrong token in one direction and refuse the right one in
  * the other.
  */
-
-/** Native currency has no contract, so it carries a sentinel that is not a valid address anywhere. */
-export const NATIVE_ASSET_REFERENCE = 'native';
 
 export interface RegisteredToken {
   /** The logical name the API accepts, uppercase. */

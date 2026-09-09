@@ -1,6 +1,6 @@
 'use server';
 
-import { CheckoutSchema, isPaymentStatus } from '@cryptopay/shared';
+import { CheckoutSchema, isNetworkFamily, isPaymentStatus } from '@cryptopay/shared';
 
 import { ServerApiError, fetchPublic } from '@/lib/server-api';
 
@@ -51,7 +51,17 @@ export async function readCheckout(checkoutToken: string): Promise<CheckoutReadR
         detail: `The API reported a payment status this page does not know: ${checkout.status}.`,
       };
     }
-    return { ok: true, checkout: { ...checkout, status: checkout.status } };
+    if (!isNetworkFamily(checkout.networkFamily)) {
+      return {
+        ok: false,
+        status: 502,
+        detail: `The API reported a network family this page does not know: ${checkout.networkFamily}.`,
+      };
+    }
+    return {
+      ok: true,
+      checkout: { ...checkout, status: checkout.status, networkFamily: checkout.networkFamily },
+    };
   } catch (error) {
     if (error instanceof ServerApiError) {
       return { ok: false, status: error.status, detail: detailFor(error.status) };
