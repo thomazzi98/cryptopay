@@ -8,6 +8,7 @@ import {
 import type { Payment } from '../../domain/payment.js';
 import {
   explorerAccountUrl,
+  resolveAssetByReference,
   explorerTransactionUrl,
   networkConfigurationFor,
 } from '../../infrastructure/chain/network-configuration.js';
@@ -82,8 +83,13 @@ export function presentPayment(
 export function presentTransfer(
   transfer: StoredTransfer,
   network: NetworkIdentifier,
-  decimals: number,
+  paymentDecimals: number,
 ): PaymentTransferContract {
+  // The transfer's own asset, not the payment's. A transfer classified `wrong_asset` carries a
+  // different one, and the payment's decimals would misreport its amount by orders of magnitude.
+  const decimals =
+    resolveAssetByReference(network, transfer.assetReference)?.decimals ?? paymentDecimals;
+
   return {
     transactionReference: transfer.transactionReference,
     eventIndex: transfer.eventIndex,

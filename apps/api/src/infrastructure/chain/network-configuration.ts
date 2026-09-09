@@ -557,11 +557,44 @@ export function findAllowedAsset(network: NetworkIdentifier, symbol: string): Al
 /**
  * Asset identity is the contract address, never the symbol. Bridged USDC.e reports the same symbol
  * as native USDC, so a symbol comparison anywhere in the credit path would credit the wrong token.
+ *
+ * The denylist is consulted first and is deliberately redundant. Matching on an allowlist already
+ * excludes anything not named in it, so a denied asset could only be credited if somebody added it
+ * to the allowlist by mistake — which is exactly the mistake worth a second check, and the reason
+ * the entry names the asset and the reason it is denied rather than being a comment.
  */
 export function isAllowedAssetReference(network: NetworkIdentifier, reference: string): boolean {
-  return networkConfigurationFor(network).assetAllowlist.some(
-    (asset) => asset.reference === reference,
-  );
+  const configuration = networkConfigurationFor(network);
+  if (configuration.assetDenylist.some((asset) => asset.reference === reference)) {
+    return false;
+  }
+  return configuration.assetAllowlist.some((asset) => asset.reference === reference);
+}
+
+/**
+ * The asset an on-chain reference names, or null when this network does not settle it.
+ *
+ * Needed wherever an amount has to be rendered against the asset that actually moved rather than
+ * the one the payment asked for. A transfer classified `wrong_asset` carries a different asset from
+ * its payment, and formatting its amount with the payment's decimals reports the wrong number by a
+ * factor of a thousand or a trillion.
+ */
+export function resolveAssetByReference(
+  network: NetworkIdentifier,
+  reference: string,
+): AllowedAsset | null {
+  const configuration = networkConfigurationFor(network);
+  if (reference === NATIVE_ASSET_REFERENCE) {
+    if (!configuration.capabilities.supportsNativePayments) {
+      return null;
+    }
+    return Object.freeze({
+      reference: NATIVE_ASSET_REFERENCE,
+      symbol: configuration.nativeCurrency.symbol,
+      decimals: configuration.nativeCurrency.decimals,
+    });
+  }
+  return configuration.assetAllowlist.find((asset) => asset.reference === reference) ?? null;
 }
 
 export function explorerTransactionUrl(

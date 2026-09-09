@@ -7,7 +7,10 @@ import {
 } from '@cryptopay/shared';
 
 import { spendCeilingFor, type Configuration } from '../../configuration.js';
-import { networkConfigurationFor } from '../../infrastructure/chain/network-configuration.js';
+import {
+  networkConfigurationFor,
+  resolveAssetByReference,
+} from '../../infrastructure/chain/network-configuration.js';
 import { explorerTransactionUrl } from '../../infrastructure/chain/network-configuration.js';
 import { costOf } from '../../domain/spend-ceiling.js';
 import type {
@@ -65,10 +68,10 @@ function presentTransaction(transaction: ChainTransaction) {
 }
 
 function presentSettlement(settlement: Settlement, transactions: readonly ChainTransaction[]) {
-  const network = networkConfigurationFor(settlement.networkIdentifier);
-  const asset = network.assetAllowlist.find(
-    (candidate) => candidate.reference === settlement.assetReference,
-  );
+  // Resolved through the reference lookup rather than the allowlist, because the allowlist holds
+  // tokens only: a native settlement found nothing, fell back to zero decimals, and reported an
+  // eighteen-decimal amount as a raw integer a quintillion times too large.
+  const asset = resolveAssetByReference(settlement.networkIdentifier, settlement.assetReference);
   const decimals = asset?.decimals ?? 0;
 
   return {

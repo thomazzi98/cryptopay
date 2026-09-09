@@ -12,6 +12,7 @@ import {
   explorerAccountUrl,
   explorerTransactionUrl,
   networkConfigurationFor,
+  resolveAssetByReference,
 } from '../../infrastructure/chain/network-configuration.js';
 import { renderPaymentQrCode } from '../../infrastructure/qr/qr-code.js';
 import type { StoredTransfer } from '../../infrastructure/persistence/payment-transfer.repository.js';
@@ -94,7 +95,15 @@ function presentTransaction(
 ): GatewayTransaction {
   return {
     reference: transfer.transactionReference,
-    amount: decimal(transfer.amountInBaseUnits, payment.asset.decimals),
+    // The transfer's own asset, not the payment's. A transfer classified `wrong_asset` carries a
+    // different one, and formatting it with the payment's decimals misreports the amount by a factor
+    // of a thousand or a trillion. Falling back to the payment's decimals covers an asset this
+    // network no longer settles, where no better answer exists.
+    amount: decimal(
+      transfer.amountInBaseUnits,
+      resolveAssetByReference(payment.networkIdentifier, transfer.assetReference)?.decimals ??
+        payment.asset.decimals,
+    ),
     status: transactionStatusOf(transfer, isPaid),
     // A transfer that is no longer on the canonical chain has no confirmations, whatever the
     // payment as a whole has counted.

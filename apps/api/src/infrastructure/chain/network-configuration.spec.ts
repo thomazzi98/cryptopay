@@ -2,6 +2,7 @@ import {
   buildPaymentUri,
   CAPABILITY_NAMES,
   isCanonicalAccount,
+  NATIVE_ASSET_REFERENCE,
   USDT_TRON_MAINNET_ADDRESS,
   NETWORK_FAMILIES,
   NETWORK_IDENTIFIERS,
@@ -24,6 +25,7 @@ import {
   networksForEnvironment,
   NotALocalDevelopmentNetworkError,
   registerLocalDevelopmentAsset,
+  resolveAssetByReference,
   requireLedgerIdentity,
   requireEvmChainId,
 } from './network-configuration.js';
@@ -483,5 +485,73 @@ describe('what each network says it can do', () => {
       const memoIsExpressible = configuration.networkFamily === 'solana';
       expect(configuration.capabilities.supportsMemo).toBe(memoIsExpressible);
     }
+  });
+});
+
+/**
+ * Two failures that cost money and had no test between them.
+ *
+ * The denylist was configuration nothing read: bridged USDC.e was excluded only because the
+ * allowlist did not name it, so the entry recording why it must never be credited enforced nothing.
+ * And the allowlist holds tokens only, so anything resolving an asset through it found nothing for a
+ * native payment and fell back to zero decimals, which renders an eighteen-decimal amount as a raw
+ * integer a quintillion times too large.
+ */
+describe('resolving an asset by what the chain calls it', () => {
+  it('answers for a native currency, which is not in the allowlist and never can be', () => {
+    const asset = resolveAssetByReference('polygon-amoy', NATIVE_ASSET_REFERENCE);
+
+    expect(asset?.symbol).toBe('POL');
+    expect(asset?.decimals).toBe(18);
+  });
+
+  it.each([
+    ['polygon-amoy', 'POL', 18],
+    ['tron-nile', 'TRX', 6],
+    ['solana-devnet', 'SOL', 9],
+  ] as const)('answers with the real decimals of native %s', (network, symbol, decimals) => {
+    const asset = resolveAssetByReference(network, NATIVE_ASSET_REFERENCE);
+
+    expect(asset?.symbol).toBe(symbol);
+    expect(asset?.decimals).toBe(decimals);
+  });
+
+  it('answers for a token by its contract address', () => {
+    const asset = resolveAssetByReference('polygon-mainnet', USDC_POLYGON_MAINNET_ADDRESS);
+
+    expect(asset?.symbol).toBe('USDC');
+    expect(asset?.decimals).toBe(6);
+  });
+
+  it('answers for nothing this network does not settle', () => {
+    expect(resolveAssetByReference('polygon-mainnet', USDT_TRON_MAINNET_ADDRESS)).toBeNull();
+  });
+});
+
+describe('the denylist as an enforced rule rather than a note', () => {
+  it('refuses bridged USDC.e, which reports the identical symbol as the real one', () => {
+    expect(isAllowedAssetReference('polygon-mainnet', USDC_BRIDGED_POLYGON_MAINNET_ADDRESS)).toBe(
+      false,
+    );
+  });
+
+  /**
+   * The check that makes the denylist worth having. Matching on an allowlist already excludes a
+   * denied asset, so the only way one could be credited is if somebody added it to the allowlist by
+   * mistake, and that is exactly the mistake the second list exists to catch.
+   */
+  it('refuses a denied asset even when the allowlist names it', () => {
+    registerLocalDevelopmentAsset('local-anvil', {
+      reference: USDC_BRIDGED_POLYGON_MAINNET_ADDRESS,
+      symbol: 'USDC',
+      decimals: 6,
+    });
+
+    expect(isAllowedAssetReference('local-anvil', USDC_BRIDGED_POLYGON_MAINNET_ADDRESS)).toBe(true);
+    // Denied on the network that denies it, permitted on the one that does not: the rule is per
+    // network rather than global, and both halves are asserted so neither can quietly disappear.
+    expect(isAllowedAssetReference('polygon-mainnet', USDC_BRIDGED_POLYGON_MAINNET_ADDRESS)).toBe(
+      false,
+    );
   });
 });
