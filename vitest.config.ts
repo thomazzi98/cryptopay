@@ -42,6 +42,27 @@ export default defineConfig({
       },
       {
         test: {
+          // A real TRON node, run locally in Docker, with a database beside it. Separate from
+          // `api-integration` because that project must stay runnable with nothing but Node, and
+          // separate from `chain-live` because nothing here touches the public internet. It is the
+          // only place a TRON payment is driven by a transaction this suite actually broadcast.
+          name: 'chain-local',
+          root: './apps/api',
+          include: ['local/**/*.spec.ts'],
+          globalSetup: [
+            resolve(import.meta.dirname, 'apps/api/test/setup/postgres.global-setup.ts'),
+          ],
+          // A witness produces a block only when there is a transaction to put in it, and
+          // `broadcasttransaction` does not return until that block exists. TRON policy is nineteen
+          // confirmations, so a payment reaching completion costs around two minutes of real block
+          // production that cannot be hurried, and the budget has to cover the slowest of them.
+          testTimeout: 600_000,
+          hookTimeout: 180_000,
+          fileParallelism: false,
+        },
+      },
+      {
+        test: {
           // Reads a public test network over the internet, so it is excluded from `npm test` and
           // from `npm run test:integration`, and is run on demand. Nothing here spends anything:
           // every assertion is a read, and the transfers it checks already exist on the chain.

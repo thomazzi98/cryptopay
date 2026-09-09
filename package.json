@@ -41,7 +41,9 @@
     "demo": "node scripts/demo.mjs",
     "validate:amoy": "node scripts/validate-amoy.mjs",
     "test:e2e": "playwright test",
-    "test:e2e:demo": "node scripts/demo.mjs --exec npx playwright test"
+    "test:e2e:demo": "node scripts/demo.mjs --exec npx playwright test",
+    "test:tron-local": "vitest run --project chain-local local/tron",
+    "test:solana-local": "vitest run --project chain-local local/solana"
   },
   "devDependencies": {
     "@commitlint/cli": "21.2.2",

@@ -18,9 +18,11 @@
         "src/infrastructure/wallet/provision-seed-cli.ts",
         "src/**/*.spec.ts",
         "test/**/*.spec.ts",
-        "test/setup/*.ts"
+        "test/setup/*.ts",
+        "live/**/*.spec.ts",
+        "local/**/*.spec.ts"
       ],
-      "project": ["src/**/*.ts", "test/**/*.ts"]
+      "project": ["src/**/*.ts", "test/**/*.ts", "live/**/*.ts", "local/**/*.ts"]
     }
   }
 }
