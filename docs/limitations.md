@@ -29,11 +29,11 @@ That KMS adapter is deliberately **not** shipped. An adapter nobody runs is dead
 repository forbids dead code. Adding it is a small change; operating it is the part that matters and
 that this repository does not do.
 
-## 2. Derivation is non-hardened
+## 2. Derivation is non-hardened on the secp256k1 families, and Solana pays a different price
 
-Payment addresses come from `m/44'/60'/0'/0/{index}`. The account level is hardened; the address
-level is not, because allocation has to be possible from an extended public key alone so that the
-process which creates payments structurally cannot sign anything.
+Payment addresses on Polygon and TRON come from `m/44'/{coin}'/0'/0/{index}`. The account level is
+hardened; the address level is not, because allocation has to be possible from an extended public key
+alone so that the process which creates payments structurally cannot sign anything.
 
 The consequence is standard for this construction and worth stating: **the account extended public
 key plus any single leaked child private key together yield every private key in that branch.**
@@ -41,6 +41,16 @@ key plus any single leaked child private key together yield every private key in
 Mitigated by never exposing the extended public key, by per-environment seeds, by deriving a key
 only at the moment it is used and zeroing it afterwards, and by sweeping on finality so the balance
 sitting under those keys is small and short-lived. Not eliminated.
+
+Solana is the other way round and could not have been arranged differently. SLIP-0010 defines
+ed25519 derivation as hardened-only, so there is no extended public key and **the master seed must be
+opened to issue a Solana address**. It is opened per allocation and zeroed immediately rather than
+cached, so the exposure is a few milliseconds per payment created rather than the life of the
+process, but the payment creation path does touch seed material on that one family and does not on
+the other two. In exchange, a leaked Solana child key exposes only its own address.
+
+`docs/security-address-derivation.md` reviews both in full, including what is deliberately not
+protected.
 
 ## 3. Finality is asserted by providers we do not control
 
@@ -138,32 +148,55 @@ partition, or with a database that has been running for a year. Nothing here has
 ## 10. What multi-chain support was and was not validated on
 
 The three families are not equally proven, and the difference matters more than the feature list.
+Three levels of evidence are used below and they are not interchangeable.
 
-|                                             | Polygon                     | TRON                             | Solana                           |
-| ------------------------------------------- | --------------------------- | -------------------------------- | -------------------------------- |
-| Token detection                             | local chain, full lifecycle | recorded shapes plus a live read | recorded shapes plus a live read |
-| Native detection                            | local chain, full lifecycle | recorded shapes                  | recorded shapes                  |
-| Payment URI and QR                          | decoded from the image      | decoded from the image           | decoded from the image           |
-| A payment actually sent and detected        | yes, on a local chain       | **no**                           | **no**                           |
-| A real transaction broadcast by this system | once, on mainnet            | never                            | never                            |
+- **Local chain** means a real node of that chain's own software, run in Docker on one machine, with
+  transactions this suite broadcast and signed itself. It proves encoding, signing, block production
+  and detection. It proves nothing about peers, forks, propagation or a public endpoint's manners.
+- **Live read** means the adapter pointed at the real public network, decoding history that already
+  exists there. It proves the shapes that network really returns today.
+- **Mainnet** means real money.
 
-What "a live read" means precisely: the adapter is pointed at the public Nile or Devnet network and
-asked to decode history that already exists there. For TRON that check is strong, because the
-adapter's answer is compared against TronGrid's own account-indexed API for the same transfer, so a
-decoding error shows up as a disagreement with an independent source rather than as a passing test.
-For Solana the live check establishes that the header chain links by identifier rather than by
-arithmetic, that the adapter asks which slots produced a block rather than assuming every slot did,
-and that the block request accepts every transaction version a node will serve. It does **not**
-establish that slots are currently being skipped: skipping is intermittent, and a 250-slot devnet
-window was observed in which all 251 slots produced a block. Handling a gap when one appears is
-proven by the unit suite, which can produce one on demand; asserting it against the live network
-would be asserting the network's mood.
+|                                               | Polygon                     | TRON                      | Solana                 |
+| --------------------------------------------- | --------------------------- | ------------------------- | ---------------------- |
+| Destination derived and accepted by the chain | local chain                 | local chain               | local chain            |
+| Payment URI and QR                            | decoded from the image      | decoded from the image    | decoded from the image |
+| Native payment sent, detected, completed      | local chain                 | local chain               | local chain            |
+| Token payment sent and detected               | local chain, full lifecycle | local chain, adapter only | not sent               |
+| Reading real network history                  | live read                   | live read, cross-checked  | live read              |
+| A payment sent on the public testnet          | yes, on Amoy                | **no**                    | **no**                 |
+| A transaction broadcast on mainnet            | once                        | never                     | never                  |
 
-What no test on this repository establishes is that a payment sent to a TRON or Solana destination
-by a real wallet is detected end to end. That needs a funded testnet account, and neither faucet is
-reachable programmatically from the machine this was built on: Solana's devnet airdrop endpoint
-refuses, and TRON's Nile faucet is a web form. The read path and the send path are different halves,
-and only one of them has been walked on those two chains.
+**What the local chains are.** TRON is `tronbox/tre`, a single-witness java-tron whose genesis
+pre-funds a known account. Solana is `anzaxyz/agave` running `agave-test-validator`. Both answer on
+the same HTTP and JSON-RPC surfaces the adapters use in production, and both suites broadcast real
+signed transactions rather than replaying fixtures. A TRON block is produced only when there is a
+transaction to put in it, which is why nineteen confirmations cost a minute of real block production
+that cannot be hurried.
+
+**Where the TRON token test stops short.** A TRC-20 contract is deployed on the local node, minted,
+transferred, and read back by the adapter, which is the check that matters most on TRON: event logs
+carry addresses without the `0x41` byte, and reading one as an EVM address produces a plausible
+identity belonging to nobody. What is not driven is the payment lifecycle for that token, because
+the asset allowlist a payment is classified against is frozen per network and correctly refuses a
+contract deployed at runtime. The local-development escape hatch is deliberately restricted to the
+Anvil network so it cannot become a way to add an asset to a real one. That is the safety property
+working rather than a gap in it.
+
+**What no test here establishes.** That a payment sent by a real wallet on the public Nile or Devnet
+networks is detected end to end. That needs a funded testnet account, and neither faucet is reachable
+programmatically from the machine this was built on: Solana's devnet airdrop endpoint answers
+`Internal error` and its testnet endpoint `503`, and TRON's Nile faucet is a web form. The read path
+and the send path are different halves; on those two public networks only one of them has been
+walked. A single funded address on each would close it, and the suites are written so that pointing
+them at a public endpoint is a URL change rather than a rewrite.
+
+**A semantic difference worth knowing before reading a Solana transfer row.** `source_account` does
+not mean on Solana what it means on an EVM chain. A Solana transaction may debit several accounts,
+so there is no single sender to record, and the adapter deliberately stores the account that was
+credited rather than guessing which debit was the payment. The field is not published through the
+gateway API; it is visible in the dashboard's transfer list, where on a Solana payment it shows the
+deposit address rather than the payer.
 
 ## 11. Known open findings
 

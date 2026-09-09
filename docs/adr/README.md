@@ -15,6 +15,7 @@ revisit later, because there is nothing written down to weigh against the new ci
 | [0006](0006-standard-webhooks.md)                     | Callbacks follow Standard Webhooks, so a merchant verifies with a library they already trust.     |
 | [0007](0007-ports-and-the-ones-refused.md)            | Five ports, and the reasons the obvious others are refused.                                       |
 | [0008](0008-no-dependency-injection-framework.md)     | Fastify and a hand-written composition root rather than NestJS.                                   |
+| [0009](0009-per-family-address-derivation.md)         | Destinations are derived per family, and ed25519 cannot keep the property secp256k1 gives.        |
 
 ## Not yet recorded
 

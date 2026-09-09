@@ -69,28 +69,55 @@ willing to lose money to.
 
 ## A new chain family
 
-Solana, Tron, Bitcoin. This is the one that needs code, and it is bounded by design rather than by
-optimism.
+Bitcoin, Aptos, anything that is not an EVM chain. This is the one that needs code, and it is bounded
+by design rather than by optimism. TRON and Solana have both been through it, so the list below is
+what it actually cost rather than what it was hoped to cost.
 
-Implement `ChainGateway` (`apps/api/src/application/ports/chain-gateway.port.ts`) for the new chain
-and construct it instead of `EvmChainGateway` for that network. The port speaks ledger vocabulary
-with opaque string identifiers — there is no transaction hash, no log index, no ABI and no chain id
-in it, and a lint rule keeps those spellings out of `domain/` and `application/` entirely. That is
-what keeps the rest of the system out of the change.
+**1. Implement `ChainGateway`** (`apps/api/src/application/ports/chain-gateway.port.ts`) and
+construct it instead of `EvmChainGateway` for that network. The port speaks ledger vocabulary with
+opaque string identifiers: no transaction hash, no log index, no ABI, no chain id, and a lint rule
+keeps those spellings out of `domain/` and `application/` entirely. That is what keeps the rest of
+the system out of the change.
 
 The port has a `skipped` arm on position lookup that is free on EVM and load-bearing elsewhere: a
 Solana slot can legitimately produce no block, and without that arm the ancestry walk reads a healthy
 chain as a reorg and halts scanning.
 
-Unchanged by a new chain: the `Payment` aggregate, the transition table, `Money`, the acceptance band,
-the finality policy, every use case, the compare-and-swap SQL, the outbox, the webhook signer and the
-retry schedule.
+**2. Declare how the chain writes an account down.** `AddressForm` in
+`packages/shared/src/network-descriptor.ts`, the matching branch in `isCanonicalAccount`, and the
+SQL predicate of the same name. Give the family its own form rather than reusing a neighbour's:
+TRON and Solana are both base58 in the same length range, and the shared form that once covered both
+would have accepted each family's address where the other belonged. Migration 0015 is the repair and
+the reasoning.
 
-**Where the claim is not yet proven.** The EVM adapter is the only implementation, so the port's
-shape is argued from its design and from `chain-gateway.spec.ts` running against a real chain — not
-from a second adapter passing the same suite. A genuine second chain would start by extracting that
-spec into a suite parameterised by an adapter factory, so both run identical assertions. Until that
-exists, treat the second chain as a week of work with a known shape, not as a configuration change.
+**3. Add an address strategy** in `apps/api/src/infrastructure/wallet/`. Two questions decide the
+shape, and the second one decides a security property rather than a style:
+
+- Which registered SLIP-0044 coin type? An address derived under the wrong one is valid and
+  unreachable by any wallet restoring the seed.
+- Which curve? secp256k1 supports non-hardened derivation, so the family joins the existing allocator
+  and payment creation continues to hold no private key. Ed25519 does not: SLIP-0010 makes derivation
+  hardened-only, there is no extended public key, and the seed must be opened per address. The
+  `AddressStrategy` union has one arm for each, so the compiler makes you choose. See ADR-0009.
+
+**4. Add a payment URI builder** in `packages/shared/src/payment-uri.ts`, or declare
+`supportsPaymentUri: false` and mean it. There is one builder for the whole product; the hosted
+checkout and the API both draw from it, and a second one is how a native payment ends up rendered as
+a token transfer.
+
+**5. Register the network, its assets and its capabilities.** A capability flag that is true where
+the code cannot honour it is worse than a missing feature, because it is advertised.
+
+Unchanged by a new chain: the `Payment` aggregate, the transition table, `Money`, the acceptance
+band, the finality policy, every use case, the compare-and-swap SQL, the outbox, the webhook signer
+and the retry schedule. That list held for both families that have been added since it was written.
+
+**Where the claim is still not fully proven.** There are now three adapters, so the port's shape is
+no longer argued from one implementation. What still does not exist is a single contract suite
+parameterised by an adapter factory: `chain-gateway.spec.ts` runs against Anvil, and TRON and Solana
+have their own local-node and live-network suites asserting comparable things in their own words.
+Extracting one shared suite is the work that would turn "three adapters exist" into "three adapters
+satisfy the same contract".
 
 ## Adding a payment status
 
