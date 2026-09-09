@@ -29,6 +29,10 @@ const NETWORK_LABELS: Readonly<Record<NetworkIdentifier, string>> = Object.freez
   'tron-nile': 'TRON Nile',
   'solana-mainnet': 'Solana',
   'solana-devnet': 'Solana Devnet',
+  // Present so the record stays exhaustive. Neither is reachable through the public API, because
+  // `resolveNetwork` refuses to hand a caller a local development chain.
+  'tron-local': 'Local TRON',
+  'solana-local': 'Local Solana',
 });
 
 export const SELECTABLE_NETWORKS: readonly NetworkIdentifier[] = NETWORK_IDENTIFIERS;

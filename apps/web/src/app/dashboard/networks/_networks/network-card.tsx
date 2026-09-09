@@ -140,7 +140,13 @@ export function NetworkCard({ network }: { network: NetworkDescriptor }) {
             Chain identity
           </p>
           <div className="mt-1">
-            <Copyable value={network.ledgerIdentity} />
+            {network.ledgerIdentity === null ? (
+              <p className="text-xs text-text-muted">
+                None configured, so this network cannot be scanned from configuration.
+              </p>
+            ) : (
+              <Copyable value={network.ledgerIdentity} />
+            )}
           </div>
           <p className="mt-1 text-xs text-text-muted">
             Asserted before scanning starts. An endpoint serving a different chain stops the worker

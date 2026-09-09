@@ -182,9 +182,10 @@ export const AmountSchema = z
 
 export const AssetSchema = z
   .object({
-    reference: z
-      .string()
-      .meta({ description: 'Contract address on an EVM network. This is the token identity.' }),
+    reference: z.string().meta({
+      description:
+        "What identifies the asset, and the only thing ever compared to decide what a transfer paid. A contract address on Polygon or TRON, a mint address on Solana, or the literal string 'native' when the payment is in the chain's own currency and there is no contract to name. Never the symbol: more than one contract reports the same one.",
+    }),
     symbol: z.string().meta({
       description:
         'Display only. Bridged USDC.e reports the identical symbol, so never compare it.',
@@ -466,9 +467,9 @@ export const NetworkDescriptorSchema = z
   .object({
     network: NetworkIdentifierSchema,
     networkFamily: NetworkFamilySchema,
-    ledgerIdentity: z.string().meta({
+    ledgerIdentity: z.string().nullable().meta({
       description:
-        'What the chain calls itself, compared as an opaque string when a connection is opened. Asserting it is what stops an endpoint quietly serving a different chain.',
+        'What the chain calls itself, compared as an opaque string when a connection is opened. Asserting it is what stops an endpoint quietly serving a different chain. Null on a local development chain, whose genesis is created when it starts and is read from the node rather than configured.',
     }),
     addressForm: z.enum(['evm-lowercase-hex', 'tron-base58check', 'solana-base58']).meta({
       description:

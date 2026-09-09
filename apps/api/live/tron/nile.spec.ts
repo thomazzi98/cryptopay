@@ -6,7 +6,10 @@ import {
 import { beforeAll, describe, expect, it } from 'vitest';
 
 import { LedgerIdentityMismatchError } from '../../src/application/ports/chain-gateway.port.js';
-import { networkConfigurationFor } from '../../src/infrastructure/chain/network-configuration.js';
+import {
+  networkConfigurationFor,
+  requireLedgerIdentity,
+} from '../../src/infrastructure/chain/network-configuration.js';
 import { TronChainGateway } from '../../src/infrastructure/chain/tron/tron-chain-gateway.js';
 import { HttpTronNode } from '../../src/infrastructure/chain/tron/tron-client.js';
 
@@ -31,7 +34,7 @@ function gateway(): TronChainGateway {
   return new TronChainGateway({
     networkIdentifier: 'tron-nile',
     node: new HttpTronNode({ baseUrl: NILE_BASE_URL, apiKey: null, timeoutMilliseconds: 30_000 }),
-    expectedLedgerIdentity: networkConfigurationFor('tron-nile').ledgerIdentity,
+    expectedLedgerIdentity: requireLedgerIdentity(networkConfigurationFor('tron-nile')),
   });
 }
 
@@ -86,7 +89,7 @@ describe('the Nile network as the adapter sees it', () => {
     const wrong = new TronChainGateway({
       networkIdentifier: 'tron-nile',
       node: new HttpTronNode({ baseUrl: NILE_BASE_URL, apiKey: null, timeoutMilliseconds: 30_000 }),
-      expectedLedgerIdentity: networkConfigurationFor('tron-mainnet').ledgerIdentity,
+      expectedLedgerIdentity: requireLedgerIdentity(networkConfigurationFor('tron-mainnet')),
     });
     await expect(wrong.assertLedgerIdentity()).rejects.toBeInstanceOf(LedgerIdentityMismatchError);
   });

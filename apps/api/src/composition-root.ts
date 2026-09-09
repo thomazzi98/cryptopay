@@ -26,6 +26,7 @@ import {
   NETWORK_CONFIGURATIONS,
   registerLocalDevelopmentAsset,
   requireEvmChainId,
+  requireLedgerIdentity,
   type NetworkConfiguration,
 } from './infrastructure/chain/network-configuration.js';
 import { TOKEN_REGISTRY, validateTokenRegistry } from './infrastructure/chain/token-registry.js';
@@ -264,7 +265,7 @@ function gatewayFor(configuration: Configuration, network: NetworkConfiguration)
     return new SolanaChainGateway({
       networkIdentifier: network.networkIdentifier,
       node: new HttpSolanaNode({ endpoint }),
-      expectedLedgerIdentity: network.ledgerIdentity,
+      expectedLedgerIdentity: requireLedgerIdentity(network),
     });
   }
   if (network.networkFamily === 'tron') {
@@ -275,7 +276,7 @@ function gatewayFor(configuration: Configuration, network: NetworkConfiguration)
     return new TronChainGateway({
       networkIdentifier: network.networkIdentifier,
       node: new HttpTronNode({ baseUrl: endpoint, apiKey: null }),
-      expectedLedgerIdentity: network.ledgerIdentity,
+      expectedLedgerIdentity: requireLedgerIdentity(network),
     });
   }
   return new EvmChainGateway({
@@ -302,7 +303,7 @@ export function composeChainWorker(
   });
 
   if (configuration.localAnvilUsdcAddress !== undefined) {
-    registerLocalDevelopmentAsset({
+    registerLocalDevelopmentAsset('local-anvil', {
       reference: configuration.localAnvilUsdcAddress,
       symbol: 'USDC',
       decimals: 6,
@@ -437,7 +438,7 @@ export async function composeSettlementWorker(
   });
 
   if (configuration.localAnvilUsdcAddress !== undefined) {
-    registerLocalDevelopmentAsset({
+    registerLocalDevelopmentAsset('local-anvil', {
       reference: configuration.localAnvilUsdcAddress,
       symbol: 'USDC',
       decimals: 6,

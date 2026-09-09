@@ -303,6 +303,10 @@ export function rpcUrlsFor(
     'tron-nile': configuration.tronNileRpcUrls,
     'solana-mainnet': configuration.solanaMainnetRpcUrls,
     'solana-devnet': configuration.solanaDevnetRpcUrls,
+    // The local chains are driven by their own test suites, which construct an adapter pointed at a
+    // container. Nothing in a deployment scans them, so no endpoint is configurable.
+    'tron-local': Object.freeze([]),
+    'solana-local': Object.freeze([]),
   };
   return byNetwork[network];
 }
@@ -324,8 +328,10 @@ export function spendCeilingFor(
     // Nothing signs on TRON or Solana, so there is no spend to bound.
     'tron-mainnet': undefined,
     'tron-nile': undefined,
+    'tron-local': undefined,
     'solana-mainnet': undefined,
     'solana-devnet': undefined,
+    'solana-local': undefined,
   };
   const configured = byNetwork[network];
   if (configured === undefined) {
@@ -352,8 +358,10 @@ export function walletRpcUrlFor(
     // endpoint this system published.
     'tron-mainnet': undefined,
     'tron-nile': undefined,
+    'tron-local': undefined,
     'solana-mainnet': undefined,
     'solana-devnet': undefined,
+    'solana-local': undefined,
   };
   return byNetwork[network] ?? null;
 }

@@ -23,6 +23,7 @@ import {
   POLYGON_NATIVE_CURRENCY_DECIMALS,
   POLYGON_NATIVE_CURRENCY_SYMBOL,
   USDC_BRIDGED_POLYGON_MAINNET_ADDRESS,
+  canonicaliseAccount,
   type AddressForm,
   type ReferenceForm,
   type Environment,
@@ -64,7 +65,14 @@ export interface NetworkConfiguration {
    * comparison is what stops an endpoint quietly serving a different chain, and it must not assume
    * the identity is a number, because on two of the three families it is not.
    */
-  readonly ledgerIdentity: string;
+  /**
+   * What the chain must call itself before it will be scanned: a chain id on EVM, a genesis
+   * reference elsewhere. Null on a local development chain, whose genesis is created when the
+   * container starts and is therefore read from the node by whatever drives it rather than frozen
+   * here. Null means "this network cannot be scanned from configuration", and `requireLedgerIdentity`
+   * is what turns that into a refusal rather than an unchecked scan.
+   */
+  readonly ledgerIdentity: string | null;
   /** Present only where the family genuinely has one. Used for EIP-681 and the public chainId. */
   readonly evmChainId: number | null;
   readonly addressForm: AddressForm;
@@ -201,6 +209,75 @@ export const NETWORK_CONFIGURATIONS: Readonly<Record<NetworkIdentifier, NetworkC
       explorerBaseUrl: '',
     }),
 
+    'tron-local': Object.freeze({
+      networkIdentifier: 'tron-local',
+      networkFamily: 'tron',
+      // A local chain has its own genesis, so there is nothing to freeze here. The adapter is given
+      // the identity it read from the node, which is what keeps the guard against scanning the
+      // wrong chain real rather than disabled.
+      ledgerIdentity: null,
+      evmChainId: null,
+      addressForm: 'tron-base58check',
+      referenceForm: 'bare-hex',
+      capabilities: Object.freeze({
+        supportsNativePayments: true,
+        supportsTokenPayments: true,
+        supportsPaymentUri: true,
+        supportsEventMonitoring: true,
+        // A single witness solidifies its own blocks immediately, so the tag exists but tracks the
+        // head and proves nothing. Treated as absent rather than trusted.
+        supportsFinalityTracking: false,
+        supportsMemo: false,
+        supportsSettlement: false,
+      }),
+      displayName: 'Local TRON',
+      environment: 'test',
+      nativeCurrency: {
+        symbol: TRON_NATIVE_CURRENCY_SYMBOL,
+        decimals: TRON_NATIVE_CURRENCY_DECIMALS,
+      },
+      // Low on purpose. A local witness produces a block only when there is a transaction for it,
+      // so every confirmation costs a real broadcast; nineteen would make the suite untestable
+      // without proving anything the count on a real network proves.
+      requiredConfirmations: 2,
+      requiresFinalityTag: false,
+      maximumReorgDepth: 8,
+      assetAllowlist: allowlistFrom('tron-local'),
+      assetDenylist: Object.freeze([]),
+      explorerBaseUrl: '',
+    }),
+
+    'solana-local': Object.freeze({
+      networkIdentifier: 'solana-local',
+      networkFamily: 'solana',
+      ledgerIdentity: null,
+      evmChainId: null,
+      addressForm: 'solana-base58',
+      referenceForm: 'base58-exact',
+      capabilities: Object.freeze({
+        supportsNativePayments: true,
+        supportsTokenPayments: true,
+        supportsPaymentUri: true,
+        supportsEventMonitoring: true,
+        supportsFinalityTracking: true,
+        supportsMemo: true,
+        supportsSettlement: false,
+      }),
+      displayName: 'Local Solana',
+      environment: 'test',
+      nativeCurrency: {
+        symbol: SOLANA_NATIVE_CURRENCY_SYMBOL,
+        decimals: SOLANA_NATIVE_CURRENCY_DECIMALS,
+      },
+      // Scanning reads finalized slots only, so a scanned slot is already final.
+      requiredConfirmations: 1,
+      requiresFinalityTag: true,
+      maximumReorgDepth: 8,
+      assetAllowlist: allowlistFrom('solana-local'),
+      assetDenylist: Object.freeze([]),
+      explorerBaseUrl: '',
+    }),
+
     'tron-mainnet': Object.freeze({
       networkIdentifier: 'tron-mainnet',
       networkFamily: 'tron',
@@ -330,40 +407,87 @@ export const NETWORK_CONFIGURATIONS: Readonly<Record<NetworkIdentifier, NetworkC
   });
 
 /**
- * Assets deployed by a local development chain, registered at boot.
+ * The networks whose asset list may be added to at runtime.
  *
- * Every other network's asset list is a frozen constant, because a token address that can be changed
- * at runtime is a way to redirect what a payment credits. A development chain genuinely redeploys its
- * token on every start, so there is nothing to freeze; the signature accepts no network argument, so
- * this cannot become a way to add an asset to Polygon.
+ * Every other network's list is a frozen constant, because a token address that can be changed while
+ * the process runs is a way to redirect what a payment credits. A development chain genuinely
+ * redeploys its token on every start, so there is nothing to freeze.
+ *
+ * The guarantee that matters is unchanged and is now enforced rather than implied: registration
+ * takes a network, and a network outside this set is refused. Naming one of the real networks here
+ * would be the mistake, and it is one line to see.
  */
-const localDevelopmentAssets: AllowedAsset[] = [];
+const LOCAL_DEVELOPMENT_NETWORKS: ReadonlySet<NetworkIdentifier> = new Set<NetworkIdentifier>([
+  'local-anvil',
+  'tron-local',
+  'solana-local',
+]);
 
-export function registerLocalDevelopmentAsset(asset: AllowedAsset): void {
-  const reference = asset.reference.toLowerCase();
-  const registered = Object.freeze({ ...asset, reference });
-  const alreadyRegistered = localDevelopmentAssets.findIndex(
-    (entry) => entry.reference === reference,
+export class NotALocalDevelopmentNetworkError extends Error {
+  constructor(network: NetworkIdentifier) {
+    super(`${network} is not a local development chain and its asset list cannot be added to`);
+    this.name = 'NotALocalDevelopmentNetworkError';
+  }
+}
+
+const localDevelopmentAssets = new Map<NetworkIdentifier, AllowedAsset[]>();
+
+/**
+ * Registers a token deployed by a local chain. The reference is canonicalised for the network's own
+ * form rather than lowercased, because lowercasing a base58 address produces one nobody holds a key
+ * for, and the whole point of registering it is that a payment will be matched against it.
+ */
+export function registerLocalDevelopmentAsset(
+  network: NetworkIdentifier,
+  asset: AllowedAsset,
+): void {
+  if (!LOCAL_DEVELOPMENT_NETWORKS.has(network)) {
+    throw new NotALocalDevelopmentNetworkError(network);
+  }
+  const reference = canonicaliseAccount(
+    NETWORK_CONFIGURATIONS[network].addressForm,
+    asset.reference,
   );
+  const registered = Object.freeze({ ...asset, reference });
+  const assets = localDevelopmentAssets.get(network) ?? [];
+  const alreadyRegistered = assets.findIndex((entry) => entry.reference === reference);
   if (alreadyRegistered === -1) {
-    localDevelopmentAssets.push(registered);
+    assets.push(registered);
+    localDevelopmentAssets.set(network, assets);
     return;
   }
-  localDevelopmentAssets[alreadyRegistered] = registered;
+  assets[alreadyRegistered] = registered;
+  localDevelopmentAssets.set(network, assets);
 }
 
 export function networkConfigurationFor(network: NetworkIdentifier): NetworkConfiguration {
   const configuration = NETWORK_CONFIGURATIONS[network];
-  if (network !== 'local-anvil') {
+  const registered = localDevelopmentAssets.get(network);
+  if (registered === undefined) {
     return configuration;
   }
-  return { ...configuration, assetAllowlist: localDevelopmentAssets };
+  return { ...configuration, assetAllowlist: registered };
 }
 
 /**
  * The numeric chain id an EVM adapter needs. Non-EVM families have none, so asking for one is a
  * configuration error rather than something to paper over with a zero.
  */
+/**
+ * The identity a scanner asserts before reading a block. Absent only on a local development chain,
+ * where asking for one is a configuration error rather than something to paper over: scanning a
+ * chain without checking which chain it is is how a payment gets credited from the wrong ledger.
+ */
+export function requireLedgerIdentity(configuration: NetworkConfiguration): string {
+  const identity = configuration.ledgerIdentity;
+  if (identity === null) {
+    throw new Error(
+      `${configuration.networkIdentifier} has no configured ledger identity and cannot be scanned from configuration`,
+    );
+  }
+  return identity;
+}
+
 export function requireEvmChainId(configuration: NetworkConfiguration): number {
   if (configuration.evmChainId === null) {
     throw new Error(
@@ -388,11 +512,14 @@ export function resolveNetwork(
     (configuration) =>
       configuration.networkFamily === family && configuration.environment === environment,
   );
+  // A local development chain is never what a caller naming a family meant, and it must not be
+  // reachable from the public contract at all. The exclusion is by membership of the local set
+  // rather than by naming one network, because naming one is exactly how `tron-local` became the
+  // network a `cp_test_` key received when it asked for TRON.
   const preferred = candidates.find(
-    (configuration) => configuration.networkIdentifier !== 'local-anvil',
+    (configuration) => !LOCAL_DEVELOPMENT_NETWORKS.has(configuration.networkIdentifier),
   );
-  const chosen = preferred ?? candidates[0];
-  return chosen === undefined ? null : networkConfigurationFor(chosen.networkIdentifier);
+  return preferred === undefined ? null : networkConfigurationFor(preferred.networkIdentifier);
 }
 
 export function networksForEnvironment(environment: Environment): readonly NetworkConfiguration[] {

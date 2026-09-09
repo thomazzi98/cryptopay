@@ -198,7 +198,11 @@ beforeAll(async () => {
 
   rpcUrl = `http://127.0.0.1:${inject('anvilPort').toString()}`;
   tokenAddress = inject('anvilTokenAddress').toLowerCase();
-  registerLocalDevelopmentAsset({ reference: tokenAddress, symbol: 'USDC', decimals: 6 });
+  registerLocalDevelopmentAsset('local-anvil', {
+    reference: tokenAddress,
+    symbol: 'USDC',
+    decimals: 6,
+  });
 
   const artifact = JSON.parse(
     await readFile(resolve(packageRoot, 'test/fixtures/mock-usdc.json'), 'utf8'),

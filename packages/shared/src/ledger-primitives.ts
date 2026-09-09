@@ -14,7 +14,9 @@ export type NetworkIdentifier =
   | 'tron-mainnet'
   | 'tron-nile'
   | 'solana-mainnet'
-  | 'solana-devnet';
+  | 'solana-devnet'
+  | 'tron-local'
+  | 'solana-local';
 
 export type Environment = 'live' | 'test';
 
@@ -26,6 +28,8 @@ export const NETWORK_IDENTIFIERS: readonly NetworkIdentifier[] = Object.freeze([
   'tron-nile',
   'solana-mainnet',
   'solana-devnet',
+  'tron-local',
+  'solana-local',
 ]);
 
 export const ENVIRONMENTS: readonly Environment[] = Object.freeze(['live', 'test']);

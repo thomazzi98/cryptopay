@@ -257,7 +257,11 @@ beforeAll(async () => {
   await pool.query(`INSERT INTO merchants (id, name) VALUES ($1, 'Resilience Fixtures')`, [
     MERCHANT_ID,
   ]);
-  registerLocalDevelopmentAsset({ reference: tokenAddress, symbol: 'USDC', decimals: 6 });
+  registerLocalDevelopmentAsset('local-anvil', {
+    reference: tokenAddress,
+    symbol: 'USDC',
+    decimals: 6,
+  });
 
   const wallet = createWalletClient({ account: payer, transport: http(rpcUrl) });
   await wallet.writeContract({

@@ -179,7 +179,11 @@ beforeAll(async () => {
   // The decoy reports the byte-identical symbol "USDC" and is never registered as an allowed asset,
   // which is exactly the shape of bridged USDC.e on Polygon mainnet.
   decoyTokenAddress = await deployToken();
-  registerLocalDevelopmentAsset({ reference: tokenAddress, symbol: 'USDC', decimals: 6 });
+  registerLocalDevelopmentAsset('local-anvil', {
+    reference: tokenAddress,
+    symbol: 'USDC',
+    decimals: 6,
+  });
 
   await callToken(tokenAddress, 'mint', [payer.address, 10_000_000_000n]);
   await callToken(tokenAddress, 'mint', [customer.address, 10_000_000_000n]);

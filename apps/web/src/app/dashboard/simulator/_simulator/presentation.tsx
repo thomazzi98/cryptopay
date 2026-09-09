@@ -17,6 +17,10 @@ const NETWORK_LABELS: Readonly<Record<NetworkIdentifier, string>> = Object.freez
   'tron-nile': 'TRON Nile',
   'solana-mainnet': 'Solana',
   'solana-devnet': 'Solana Devnet',
+  // Exhaustive by type, unreachable in practice: `resolveNetwork` never hands a caller a local
+  // development chain, so no payment on one can exist to be displayed here.
+  'tron-local': 'Local TRON',
+  'solana-local': 'Local Solana',
 });
 
 export function networkLabel(value: string): string {

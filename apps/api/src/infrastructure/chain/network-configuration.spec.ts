@@ -21,7 +21,9 @@ import {
   NETWORK_CONFIGURATIONS,
   networkConfigurationFor,
   networksForEnvironment,
+  NotALocalDevelopmentNetworkError,
   registerLocalDevelopmentAsset,
+  requireLedgerIdentity,
   requireEvmChainId,
 } from './network-configuration.js';
 
@@ -32,16 +34,44 @@ describe('the network table', () => {
     expect(Object.isFrozen(NETWORK_CONFIGURATIONS)).toBe(true);
   });
 
+  /**
+   * A local development chain creates its genesis when the container starts, so it has no identity
+   * to freeze here and whatever drives it reads one from the node. Every other network must carry
+   * one, because scanning a chain without checking which chain it is credits payments from the
+   * wrong ledger.
+   */
+  const LOCAL_DEVELOPMENT_NETWORKS = new Set<NetworkIdentifier>([
+    'local-anvil',
+    'tron-local',
+    'solana-local',
+  ]);
+  const CONFIGURED_NETWORKS = ALL_NETWORKS.filter(
+    (network) => !LOCAL_DEVELOPMENT_NETWORKS.has(network),
+  );
+
   it.each(ALL_NETWORKS)('describes %s completely', (network) => {
     const configuration = networkConfigurationFor(network);
-    expect(configuration.ledgerIdentity.length).toBeGreaterThan(0);
     expect(configuration.displayName.length).toBeGreaterThan(0);
     expect(configuration.requiredConfirmations).toBeGreaterThan(0);
     expect(configuration.maximumReorgDepth).toBeGreaterThan(0);
   });
 
-  it('gives every network a distinct ledger identity', () => {
-    const identifiers = ALL_NETWORKS.map(
+  it.each(CONFIGURED_NETWORKS)('names the chain %s must prove itself to be', (network) => {
+    expect(networkConfigurationFor(network).ledgerIdentity?.length ?? 0).toBeGreaterThan(0);
+  });
+
+  it.each(['tron-local', 'solana-local'] as const)(
+    'leaves %s without a configured identity, so it cannot be scanned by mistake',
+    (network) => {
+      const configuration = networkConfigurationFor(network);
+
+      expect(configuration.ledgerIdentity).toBeNull();
+      expect(() => requireLedgerIdentity(configuration)).toThrow(/cannot be scanned/);
+    },
+  );
+
+  it('gives every configured network a distinct ledger identity', () => {
+    const identifiers = CONFIGURED_NETWORKS.map(
       (network) => networkConfigurationFor(network).ledgerIdentity,
     );
     expect(new Set(identifiers).size).toBe(identifiers.length);
@@ -120,14 +150,28 @@ describe('asset resolution', () => {
 describe('registering a local development asset', () => {
   const LOCAL_TOKEN = '0x5fbdb2315678afecb367f032d93f642f64180aa3';
 
+  const LOCAL_TRON_TOKEN = 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t';
+
   it('makes the token creditable on the local chain', () => {
-    registerLocalDevelopmentAsset({ reference: LOCAL_TOKEN, symbol: 'MUSD', decimals: 6 });
+    registerLocalDevelopmentAsset('local-anvil', {
+      reference: LOCAL_TOKEN,
+      symbol: 'MUSD',
+      decimals: 6,
+    });
     expect(isAllowedAssetReference('local-anvil', LOCAL_TOKEN)).toBe(true);
   });
 
   it('registers the same token once however often it is announced', () => {
-    registerLocalDevelopmentAsset({ reference: LOCAL_TOKEN, symbol: 'MUSD', decimals: 6 });
-    registerLocalDevelopmentAsset({ reference: LOCAL_TOKEN, symbol: 'MUSD', decimals: 6 });
+    registerLocalDevelopmentAsset('local-anvil', {
+      reference: LOCAL_TOKEN,
+      symbol: 'MUSD',
+      decimals: 6,
+    });
+    registerLocalDevelopmentAsset('local-anvil', {
+      reference: LOCAL_TOKEN,
+      symbol: 'MUSD',
+      decimals: 6,
+    });
     expect(
       networkConfigurationFor('local-anvil').assetAllowlist.filter(
         (asset) => asset.reference === LOCAL_TOKEN,
@@ -136,9 +180,51 @@ describe('registering a local development asset', () => {
   });
 
   it('cannot add an asset to a real network', () => {
-    registerLocalDevelopmentAsset({ reference: LOCAL_TOKEN, symbol: 'MUSD', decimals: 6 });
+    registerLocalDevelopmentAsset('local-anvil', {
+      reference: LOCAL_TOKEN,
+      symbol: 'MUSD',
+      decimals: 6,
+    });
     expect(isAllowedAssetReference('polygon-mainnet', LOCAL_TOKEN)).toBe(false);
     expect(isAllowedAssetReference('polygon-amoy', LOCAL_TOKEN)).toBe(false);
+  });
+
+  /**
+   * The guarantee is now a runtime refusal rather than a signature that could not express the
+   * mistake. Every real network must be rejected by name, so that adding one to the local set is a
+   * failing test rather than a silent widening.
+   */
+  it.each<NetworkIdentifier>([
+    'polygon-mainnet',
+    'polygon-amoy',
+    'tron-mainnet',
+    'tron-nile',
+    'solana-mainnet',
+    'solana-devnet',
+  ])('refuses to register an asset on %s', (network) => {
+    expect(() =>
+      registerLocalDevelopmentAsset(network, {
+        reference: LOCAL_TOKEN,
+        symbol: 'MUSD',
+        decimals: 6,
+      }),
+    ).toThrow(NotALocalDevelopmentNetworkError);
+  });
+
+  /**
+   * A base58 reference must survive registration byte for byte. Lowercasing it, which is what the
+   * EVM-shaped implementation did to every reference, produces an address nobody holds a key for
+   * and a payment that can never be credited.
+   */
+  it('keeps a TRON reference in the form the chain uses', () => {
+    registerLocalDevelopmentAsset('tron-local', {
+      reference: LOCAL_TRON_TOKEN,
+      symbol: 'USDT',
+      decimals: 6,
+    });
+
+    expect(isAllowedAssetReference('tron-local', LOCAL_TRON_TOKEN)).toBe(true);
+    expect(isAllowedAssetReference('tron-local', LOCAL_TRON_TOKEN.toLowerCase())).toBe(false);
   });
 
   /**

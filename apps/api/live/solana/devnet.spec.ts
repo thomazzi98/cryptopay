@@ -2,7 +2,10 @@ import { NATIVE_ASSET_REFERENCE, SOLANA_DEVNET_GENESIS_IDENTITY } from '@cryptop
 import { beforeAll, describe, expect, it } from 'vitest';
 
 import { LedgerIdentityMismatchError } from '../../src/application/ports/chain-gateway.port.js';
-import { networkConfigurationFor } from '../../src/infrastructure/chain/network-configuration.js';
+import {
+  networkConfigurationFor,
+  requireLedgerIdentity,
+} from '../../src/infrastructure/chain/network-configuration.js';
 import { SolanaChainGateway } from '../../src/infrastructure/chain/solana/solana-chain-gateway.js';
 import { HttpSolanaNode } from '../../src/infrastructure/chain/solana/solana-client.js';
 
@@ -26,7 +29,7 @@ function gateway(): SolanaChainGateway {
   return new SolanaChainGateway({
     networkIdentifier: 'solana-devnet',
     node: new HttpSolanaNode({ endpoint: DEVNET_ENDPOINT, timeoutMilliseconds: 30_000 }),
-    expectedLedgerIdentity: networkConfigurationFor('solana-devnet').ledgerIdentity,
+    expectedLedgerIdentity: requireLedgerIdentity(networkConfigurationFor('solana-devnet')),
   });
 }
 
@@ -67,7 +70,7 @@ describe('the devnet as the adapter sees it', () => {
     const wrong = new SolanaChainGateway({
       networkIdentifier: 'solana-devnet',
       node: new HttpSolanaNode({ endpoint: DEVNET_ENDPOINT, timeoutMilliseconds: 30_000 }),
-      expectedLedgerIdentity: networkConfigurationFor('solana-mainnet').ledgerIdentity,
+      expectedLedgerIdentity: requireLedgerIdentity(networkConfigurationFor('solana-mainnet')),
     });
     await expect(wrong.assertLedgerIdentity()).rejects.toBeInstanceOf(LedgerIdentityMismatchError);
   });

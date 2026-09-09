@@ -1,5 +1,9 @@
 import {
   isCanonicalAccount,
+  SOLANA_NATIVE_CURRENCY_DECIMALS,
+  SOLANA_NATIVE_CURRENCY_SYMBOL,
+  TRON_NATIVE_CURRENCY_DECIMALS,
+  TRON_NATIVE_CURRENCY_SYMBOL,
   USDC_POLYGON_AMOY_ADDRESS,
   USDC_POLYGON_MAINNET_ADDRESS,
   USDC_SOLANA_DEVNET_MINT,
@@ -149,6 +153,27 @@ export const TOKEN_REGISTRY: Readonly<Record<NetworkIdentifier, readonly Registe
         currency: 'ETH',
         reference: NATIVE_ASSET_REFERENCE,
         decimals: 18,
+        kind: 'native' as const,
+      }),
+    ]),
+
+    // The two local chains carry only their native currency for the same reason `local-anvil` does:
+    // a development chain deploys a fresh token on every start, so there is no address to freeze
+    // and one is registered at boot instead.
+    'tron-local': Object.freeze([
+      Object.freeze({
+        currency: TRON_NATIVE_CURRENCY_SYMBOL,
+        reference: NATIVE_ASSET_REFERENCE,
+        decimals: TRON_NATIVE_CURRENCY_DECIMALS,
+        kind: 'native' as const,
+      }),
+    ]),
+
+    'solana-local': Object.freeze([
+      Object.freeze({
+        currency: SOLANA_NATIVE_CURRENCY_SYMBOL,
+        reference: NATIVE_ASSET_REFERENCE,
+        decimals: SOLANA_NATIVE_CURRENCY_DECIMALS,
         kind: 'native' as const,
       }),
     ]),
