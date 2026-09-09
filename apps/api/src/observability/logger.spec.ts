@@ -222,4 +222,82 @@ describe('a secret nested deeper than one level', () => {
 
     expect(written.join('')).not.toContain('a-plaintext-seed-value');
   });
+
+  /**
+   * pino's redact paths match one segment per star, so the list stopped at two levels and a field
+   * literally named `privateKey` below that was written out in full. An object logged during an
+   * incident is exactly how that happens, and it is never the shallow object the list was sized for.
+   */
+  it('redacts a private key three levels down, past where the path list reaches', () => {
+    const written = captureLogOutput((logger) => {
+      logger.info(
+        { allocation: { wallet: { solana: { privateKey: 'a-plaintext-private-key' } } } },
+        'derived',
+      );
+    });
+
+    expect(written.join('')).not.toContain('a-plaintext-private-key');
+  });
+
+  it('redacts a secret inside an array, which no path in the list covers', () => {
+    const written = captureLogOutput((logger) => {
+      logger.info({ wallets: [{ seed: 'a-plaintext-seed-in-an-array' }] }, 'provisioned');
+    });
+
+    expect(written.join('')).not.toContain('a-plaintext-seed-in-an-array');
+  });
+});
+
+/**
+ * The size-based net was applied only to the top-level entries of a record, so the module's promise
+ * to refuse any thirty-two or sixty-four byte binary value held at the surface and nowhere else.
+ * Those are the sizes of a private key, a wrapped data key and a seed, and the realistic way one
+ * reaches a log is inside an object somebody dumped rather than as a named top-level field.
+ */
+describe('binary values that are the size of a key', () => {
+  it.each([32, 64])('redacts a %s byte value at the top level', (size) => {
+    const written = captureLogOutput((logger) => {
+      logger.info({ material: new Uint8Array(size).fill(7) }, 'observed');
+    });
+
+    expect(written.join('')).toContain(`redacted ${size.toString()}-byte value`);
+    expect(written.join('')).not.toContain('"0":7');
+  });
+
+  it.each([32, 64])('redacts a %s byte value nested inside an object', (size) => {
+    const written = captureLogOutput((logger) => {
+      logger.info({ envelope: { material: new Uint8Array(size).fill(7) } }, 'observed');
+    });
+
+    expect(written.join('')).toContain(`redacted ${size.toString()}-byte value`);
+    expect(written.join('')).not.toContain('"0":7');
+  });
+
+  it('redacts a key-sized value inside an array', () => {
+    const written = captureLogOutput((logger) => {
+      logger.info({ keys: [new Uint8Array(32).fill(9)] }, 'observed');
+    });
+
+    expect(written.join('')).toContain('redacted 32-byte value');
+    expect(written.join('')).not.toContain('"0":9');
+  });
+
+  it('leaves a binary value that is not the size of a key alone', () => {
+    const written = captureLogOutput((logger) => {
+      logger.info({ payload: new Uint8Array(4).fill(1) }, 'observed');
+    });
+
+    expect(written.join('')).not.toContain('redacted');
+  });
+
+  /** A cycle is not a secret, but walking one forever turns a log call into an outage. */
+  it('survives a cycle rather than hanging', () => {
+    const written = captureLogOutput((logger) => {
+      const cyclic: { name: string; self?: unknown } = { name: 'loop' };
+      cyclic.self = cyclic;
+      logger.info({ cyclic }, 'observed');
+    });
+
+    expect(written.join('')).toContain('circular');
+  });
 });

@@ -33,11 +33,74 @@ export function currentRequestContext(): RequestContext | undefined {
 
 const SUSPICIOUS_BINARY_LENGTHS = new Set([32, 64]);
 
-function redactBinary(value: unknown): unknown {
-  if (value instanceof Uint8Array && SUSPICIOUS_BINARY_LENGTHS.has(value.byteLength)) {
-    return `[redacted ${value.byteLength}-byte value]`;
+/**
+ * Field names that carry a secret wherever they appear, rather than only at the depths pino's
+ * wildcard list happens to reach.
+ */
+const SECRET_FIELD_NAMES: ReadonlySet<string> = new Set([
+  'privateKey',
+  'mnemonic',
+  'masterSeed',
+  'seed',
+  'signingSecret',
+  'secretDigest',
+  'apiKey',
+  'authorization',
+  'allocationReference',
+  'derivationIndex',
+  'derivationPath',
+  'chainCode',
+]);
+
+/**
+ * How deep the walk goes before it stops looking. Six is past anything this system logs on purpose,
+ * and a bound is what keeps a pathological object from turning a log line into a hang.
+ */
+const MAXIMUM_REDACTION_DEPTH = 6;
+
+const CENSORED = '[redacted]';
+
+/**
+ * Redacts secrets anywhere in a logged value, not merely at its surface.
+ *
+ * Two holes closed here. The size-based net used to be applied by mapping over the top-level entries
+ * of the record, so a thirty-two byte key one level down was rendered byte for byte, and the module
+ * comment above promising that it "refuses to render any 32 or 64 byte binary value" was untrue.
+ * Separately, pino's `redact.paths` matches one path segment per star, so the `*.*.` entries stop at
+ * depth two and a field literally named `privateKey` below that was written out in full.
+ *
+ * The name list stays as well. pino applies it before this runs and does so more cheaply, so this is
+ * the net beneath it rather than a replacement for it.
+ */
+function redactBinary(value: unknown, depth = 0, seen = new WeakSet<object>()): unknown {
+  if (value instanceof Uint8Array) {
+    return SUSPICIOUS_BINARY_LENGTHS.has(value.byteLength)
+      ? `[redacted ${value.byteLength.toString()}-byte value]`
+      : value;
   }
-  return value;
+  if (value === null || typeof value !== 'object' || depth >= MAXIMUM_REDACTION_DEPTH) {
+    return value;
+  }
+  // A cycle is not a secret, but walking one forever turns a log call into an outage.
+  if (seen.has(value)) {
+    return '[circular]';
+  }
+  seen.add(value);
+
+  if (Array.isArray(value)) {
+    return value.map((entry) => redactBinary(entry, depth + 1, seen));
+  }
+  // Anything with a prototype of its own may compute properties on access, and an Error is already
+  // handled by its own serializer. Walking one here would be a second, worse implementation.
+  if (value instanceof Error || Object.getPrototypeOf(value) !== Object.prototype) {
+    return value;
+  }
+  return Object.fromEntries(
+    Object.entries(value).map(([key, entry]) => [
+      key,
+      SECRET_FIELD_NAMES.has(key) ? CENSORED : redactBinary(entry, depth + 1, seen),
+    ]),
+  );
 }
 
 const REDACTED_PATHS = [
@@ -145,9 +208,7 @@ export function createLogger(
       level: (label: string): Record<string, unknown> => ({ level: label }),
       log: (record: Record<string, unknown>): Record<string, unknown> => {
         const context = currentRequestContext();
-        const withRedactedBinaries = Object.fromEntries(
-          Object.entries(record).map(([key, value]) => [key, redactBinary(value)]),
-        );
+        const withRedactedBinaries = redactBinary(record) as Record<string, unknown>;
         if (context === undefined) {
           return withRedactedBinaries;
         }
