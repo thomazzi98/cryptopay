@@ -2,6 +2,7 @@ import {
   buildPaymentUri,
   CAPABILITY_NAMES,
   isCanonicalAccount,
+  USDT_TRON_MAINNET_ADDRESS,
   NETWORK_FAMILIES,
   NETWORK_IDENTIFIERS,
   USDC_BRIDGED_POLYGON_MAINNET_ADDRESS,
@@ -150,8 +151,6 @@ describe('asset resolution', () => {
 describe('registering a local development asset', () => {
   const LOCAL_TOKEN = '0x5fbdb2315678afecb367f032d93f642f64180aa3';
 
-  const LOCAL_TRON_TOKEN = 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t';
-
   it('makes the token creditable on the local chain', () => {
     registerLocalDevelopmentAsset('local-anvil', {
       reference: LOCAL_TOKEN,
@@ -218,13 +217,15 @@ describe('registering a local development asset', () => {
    */
   it('keeps a TRON reference in the form the chain uses', () => {
     registerLocalDevelopmentAsset('tron-local', {
-      reference: LOCAL_TRON_TOKEN,
+      reference: USDT_TRON_MAINNET_ADDRESS,
       symbol: 'USDT',
       decimals: 6,
     });
 
-    expect(isAllowedAssetReference('tron-local', LOCAL_TRON_TOKEN)).toBe(true);
-    expect(isAllowedAssetReference('tron-local', LOCAL_TRON_TOKEN.toLowerCase())).toBe(false);
+    expect(isAllowedAssetReference('tron-local', USDT_TRON_MAINNET_ADDRESS)).toBe(true);
+    expect(isAllowedAssetReference('tron-local', USDT_TRON_MAINNET_ADDRESS.toLowerCase())).toBe(
+      false,
+    );
   });
 
   /**
