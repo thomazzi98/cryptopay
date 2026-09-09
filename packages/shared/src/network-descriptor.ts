@@ -28,10 +28,19 @@ export function isNetworkFamily(value: string): value is NetworkFamily {
  * How accounts and transaction references are written on this network.
  *
  * `evm-lowercase-hex` is 0x followed by forty lowercase hex digits, normalised by lowercasing.
- * `base58-exact` is base58 and is normalised by doing nothing at all, which is the entire point:
- * the only safe transformation of a base58 address is none.
+ *
+ * The two base58 forms are deliberately separate rather than one `base58` form. TRON and Solana
+ * both write addresses in base58 within the same length range, so a single form accepts a TRON
+ * address wherever a Solana one belongs and the reverse. Money sent to that confusion is
+ * unrecoverable, and the shapes are distinguishable: a TRON address is a twenty-five byte
+ * base58check payload, always thirty-four characters beginning with `T`, while a Solana address is
+ * a thirty-two byte ed25519 public key with no prefix and no checksum.
+ *
+ * Neither is normalised. The only safe transformation of a base58 address is none: base58 encodes
+ * information in case, so a lowercased address is not another spelling but a string nobody holds a
+ * key for.
  */
-export type AddressForm = 'evm-lowercase-hex' | 'base58-exact';
+export type AddressForm = 'evm-lowercase-hex' | 'tron-base58check' | 'solana-base58';
 
 /**
  * What a network supports. Every flag here is false somewhere and drives a refusal that a test

@@ -267,8 +267,11 @@ describe('what each network says it can do', () => {
 
   it.each(ALL_NETWORKS)('keeps %s address form consistent with its family', (network) => {
     const configuration = networkConfigurationFor(network);
-    const expected =
-      configuration.networkFamily === 'polygon' ? 'evm-lowercase-hex' : 'base58-exact';
+    const expected = {
+      polygon: 'evm-lowercase-hex',
+      tron: 'tron-base58check',
+      solana: 'solana-base58',
+    }[configuration.networkFamily];
     expect(configuration.addressForm).toBe(expected);
   });
 

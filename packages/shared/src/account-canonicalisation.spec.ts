@@ -56,12 +56,12 @@ describe('canonicalising an EVM account', () => {
 
 describe('canonicalising a base58 account', () => {
   it.each([
-    ['a TRON mainnet contract', TRON_MAINNET_USDT],
-    ['a TRON Nile contract', TRON_NILE_USDT],
-    ['a Solana mainnet mint', SOLANA_USDC_MINT],
-    ['a Solana devnet mint', SOLANA_DEVNET_USDC_MINT],
-  ])('passes %s through byte for byte', (_label, value) => {
-    expect(canonicaliseAccount('base58-exact', value)).toBe(value);
+    ['a TRON mainnet contract', 'tron-base58check' as const, TRON_MAINNET_USDT],
+    ['a TRON Nile contract', 'tron-base58check' as const, TRON_NILE_USDT],
+    ['a Solana mainnet mint', 'solana-base58' as const, SOLANA_USDC_MINT],
+    ['a Solana devnet mint', 'solana-base58' as const, SOLANA_DEVNET_USDC_MINT],
+  ])('passes %s through byte for byte', (_label, form, value) => {
+    expect(canonicaliseAccount(form, value)).toBe(value);
   });
 
   /**
@@ -72,25 +72,44 @@ describe('canonicalising a base58 account', () => {
   it('refuses a lowercased TRON address instead of treating it as the same account', () => {
     const lowercased = TRON_MAINNET_USDT.toLowerCase();
     expect(lowercased).not.toBe(TRON_MAINNET_USDT);
-    expect(isCanonicalAccount('base58-exact', lowercased)).toBe(false);
-    expect(() => canonicaliseAccount('base58-exact', lowercased)).toThrow(NonCanonicalAccountError);
+    expect(isCanonicalAccount('tron-base58check', lowercased)).toBe(false);
+    expect(() => canonicaliseAccount('tron-base58check', lowercased)).toThrow(
+      NonCanonicalAccountError,
+    );
   });
 
   it('refuses the base58 characters that do not exist', () => {
     // 0, O, I and l are excluded from the alphabet precisely because they are misread.
     for (const character of ['0', 'O', 'I', 'l']) {
       const candidate = TRON_MAINNET_USDT.slice(0, -1) + character;
-      expect(isCanonicalAccount('base58-exact', candidate)).toBe(false);
+      expect(isCanonicalAccount('tron-base58check', candidate)).toBe(false);
     }
   });
 
   it('refuses an EVM address, which is not base58 at all', () => {
-    expect(isCanonicalAccount('base58-exact', EVM_LOWERCASE)).toBe(false);
+    expect(isCanonicalAccount('tron-base58check', EVM_LOWERCASE)).toBe(false);
+    expect(isCanonicalAccount('solana-base58', EVM_LOWERCASE)).toBe(false);
   });
 
   it('refuses a string too short or too long to be an account', () => {
-    expect(isCanonicalAccount('base58-exact', 'abc')).toBe(false);
-    expect(isCanonicalAccount('base58-exact', 'a'.repeat(64))).toBe(false);
+    expect(isCanonicalAccount('solana-base58', 'abc')).toBe(false);
+    expect(isCanonicalAccount('solana-base58', 'a'.repeat(64))).toBe(false);
+  });
+
+  /**
+   * The confusion that costs the most. Both families write base58 in the same length range, so one
+   * shared form accepts each family address where the other belongs, and a payment sent to that
+   * mistake is unrecoverable because no key exists for it on the receiving chain.
+   */
+  it('refuses a Solana address where a TRON one belongs', () => {
+    expect(isCanonicalAccount('tron-base58check', SOLANA_USDC_MINT)).toBe(false);
+    expect(isCanonicalAccount('tron-base58check', SOLANA_DEVNET_USDC_MINT)).toBe(false);
+  });
+
+  it('requires the leading T and the exact TRON length', () => {
+    expect(isCanonicalAccount('tron-base58check', TRON_MAINNET_USDT.slice(1))).toBe(false);
+    expect(isCanonicalAccount('tron-base58check', `${TRON_MAINNET_USDT}A`)).toBe(false);
+    expect(isCanonicalAccount('tron-base58check', `A${TRON_MAINNET_USDT.slice(1)}`)).toBe(false);
   });
 });
 

@@ -454,7 +454,7 @@ export const NetworkDescriptorSchema = z
       description:
         'What the chain calls itself, compared as an opaque string when a connection is opened. Asserting it is what stops an endpoint quietly serving a different chain.',
     }),
-    addressForm: z.enum(['evm-lowercase-hex', 'base58-exact']).meta({
+    addressForm: z.enum(['evm-lowercase-hex', 'tron-base58check', 'solana-base58']).meta({
       description:
         'How an account is written on this network. Base58 is case sensitive, so a lowercased TRON or Solana address is a different address that nobody controls.',
     }),

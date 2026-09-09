@@ -205,7 +205,7 @@ export const NETWORK_CONFIGURATIONS: Readonly<Record<NetworkIdentifier, NetworkC
       networkFamily: 'tron',
       ledgerIdentity: TRON_MAINNET_GENESIS_IDENTITY,
       evmChainId: null,
-      addressForm: 'base58-exact',
+      addressForm: 'tron-base58check',
       referenceForm: 'bare-hex',
       capabilities: Object.freeze({
         supportsNativePayments: true,
@@ -214,9 +214,9 @@ export const NETWORK_CONFIGURATIONS: Readonly<Record<NetworkIdentifier, NetworkC
         supportsEventMonitoring: true,
         supportsFinalityTracking: true,
         supportsMemo: false,
-        // TRON is watched, never signed on. No key is derived for it and nothing sweeps it, which is
-        // what keeps a custodial destination from being offered on a chain this system cannot spend
-        // from.
+        // Watched, never signed on: no broadcaster is built for this family. Destinations are still
+        // derived from the master seed, so funds are recoverable by an operator holding it, but
+        // nothing sweeps them automatically and no API can move them. See docs/limitations.md.
         supportsSettlement: false,
       }),
       displayName: 'TRON',
@@ -238,7 +238,7 @@ export const NETWORK_CONFIGURATIONS: Readonly<Record<NetworkIdentifier, NetworkC
       networkFamily: 'tron',
       ledgerIdentity: TRON_NILE_GENESIS_IDENTITY,
       evmChainId: null,
-      addressForm: 'base58-exact',
+      addressForm: 'tron-base58check',
       referenceForm: 'bare-hex',
       capabilities: Object.freeze({
         supportsNativePayments: true,
@@ -268,7 +268,7 @@ export const NETWORK_CONFIGURATIONS: Readonly<Record<NetworkIdentifier, NetworkC
       networkFamily: 'solana',
       ledgerIdentity: SOLANA_MAINNET_GENESIS_IDENTITY,
       evmChainId: null,
-      addressForm: 'base58-exact',
+      addressForm: 'solana-base58',
       referenceForm: 'base58-exact',
       capabilities: Object.freeze({
         supportsNativePayments: true,
@@ -302,7 +302,7 @@ export const NETWORK_CONFIGURATIONS: Readonly<Record<NetworkIdentifier, NetworkC
       networkFamily: 'solana',
       ledgerIdentity: SOLANA_DEVNET_GENESIS_IDENTITY,
       evmChainId: null,
-      addressForm: 'base58-exact',
+      addressForm: 'solana-base58',
       referenceForm: 'base58-exact',
       capabilities: Object.freeze({
         supportsNativePayments: true,

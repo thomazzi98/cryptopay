@@ -145,8 +145,8 @@ describe('what boot validation refuses', () => {
    */
   it('refuses a reference that is not canonical for the network address form', () => {
     expect(() => {
-      validateTokenRegistry(withNetwork({ addressForm: 'base58-exact' }), TOKEN_REGISTRY);
-    }).toThrow(/not a canonical base58-exact address/);
+      validateTokenRegistry(withNetwork({ addressForm: 'solana-base58' }), TOKEN_REGISTRY);
+    }).toThrow(/not a canonical solana-base58 address/);
   });
 
   it('refuses to run against a network set that does not cover the registry', () => {

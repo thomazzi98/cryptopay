@@ -20,6 +20,14 @@ const EVM_REFERENCE_PATTERN = /^0x[\da-f]{64}$/;
 /** Base58 omits 0, O, I and l precisely so they cannot be confused when read aloud or by eye. */
 const BASE58_PATTERN = /^[1-9A-HJ-NP-Za-km-z]+$/;
 
+/**
+ * A TRON address is base58check over twenty-one payload bytes, which is always thirty-four
+ * characters and always begins with `T`. The checksum itself needs a hash function and is verified
+ * in the adapter that has one; this module is imported by the browser bundle and stays dependency
+ * free, so it asserts the shape that separates TRON from Solana and leaves the rest to the adapter.
+ */
+const TRON_ACCOUNT_PATTERN = /^T[1-9A-HJ-NP-Za-km-z]{33}$/;
+
 const BASE58_ACCOUNT_MINIMUM = 32;
 const BASE58_ACCOUNT_MAXIMUM = 44;
 
@@ -46,6 +54,9 @@ export class NonCanonicalAccountError extends Error {
 export function isCanonicalAccount(form: AddressForm, value: string): boolean {
   if (form === 'evm-lowercase-hex') {
     return EVM_ACCOUNT_PATTERN.test(value);
+  }
+  if (form === 'tron-base58check') {
+    return TRON_ACCOUNT_PATTERN.test(value);
   }
   return (
     value.length >= BASE58_ACCOUNT_MINIMUM &&
