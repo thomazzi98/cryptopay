@@ -82,6 +82,22 @@ interface HttpSolanaNodeOptions {
 const DEFAULT_TIMEOUT_MILLISECONDS = 15_000;
 const FINALIZED = { commitment: 'finalized' } as const;
 
+/**
+ * The highest transaction version this client will accept from a node.
+ *
+ * Not zero, which is what a reading of the documentation suggests and what this originally sent.
+ * A node refuses the WHOLE BLOCK when it contains a transaction above the stated version rather
+ * than omitting that one transaction, so a single newer transaction anywhere in a block halts
+ * scanning for the entire network. Devnet already carries version 1.
+ *
+ * Set high on purpose. Every field this adapter reads is resolved by the node before it is sent -
+ * `accountKeys` already includes addresses loaded from a lookup table, and the balance arrays are
+ * indexed to match it - so there is no version whose shape this client would misread. Pinning to
+ * the newest version that exists today would only move the outage to the day after the next one
+ * ships.
+ */
+const MAXIMUM_TRANSACTION_VERSION = 255;
+
 const TOO_MANY_REQUESTS = 429;
 const THROTTLE_RETRIES = 5;
 /**
@@ -279,7 +295,7 @@ export class HttpSolanaNode implements SolanaNode {
         {
           encoding: 'jsonParsed',
           transactionDetails: 'full',
-          maxSupportedTransactionVersion: 0,
+          maxSupportedTransactionVersion: MAXIMUM_TRANSACTION_VERSION,
           rewards: false,
           commitment: 'finalized',
         },

@@ -1,3 +1,5 @@
+import { createServer } from 'node:http';
+
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -6,7 +8,12 @@ import {
 } from '../../../application/ports/chain-gateway.port.js';
 import { NATIVE_ASSET_REFERENCE } from '../token-registry.js';
 import { SolanaChainGateway } from './solana-chain-gateway.js';
-import { decodeSolanaBlock, type SolanaBlock, type SolanaNode } from './solana-client.js';
+import {
+  decodeSolanaBlock,
+  HttpSolanaNode,
+  type SolanaBlock,
+  type SolanaNode,
+} from './solana-client.js';
 
 /**
  * What the adapter makes of what Solana says.
@@ -96,6 +103,10 @@ function blockAt(options: Parameters<typeof rawBlock>[0]): SolanaBlock {
   return decodeSolanaBlock(options.slot, rawBlock(options));
 }
 
+/**
+ * Records the options each block request carried, so the request itself can be asserted rather than
+ * only its result.
+ */
 interface StubOptions {
   readonly blocks?: readonly SolanaBlock[];
   readonly produced?: readonly number[];
@@ -379,5 +390,42 @@ describe('reconciling and reading balances', () => {
       2_500_000_000n,
     );
     await expect(gateway.readAssetBalance(MERCHANT, USDC_DEVNET)).resolves.toBe(25_000_000n);
+  });
+});
+
+/**
+ * A node refuses an entire block when it holds a transaction above the version the caller stated,
+ * rather than omitting that one transaction. Devnet already carries version 1, so a client pinned
+ * to version 0 stops scanning Solana altogether the moment a newer transaction lands in any block.
+ * This is the regression guard for that, driven through the real HTTP client against a stub server.
+ */
+describe('the version a block request is willing to accept', () => {
+  it('asks for a version high enough that a newer transaction cannot halt scanning', async () => {
+    const requests: Record<string, unknown>[] = [];
+    const server = createServer((request, response) => {
+      const chunks: Buffer[] = [];
+      request.on('data', (chunk: Buffer) => {
+        chunks.push(chunk);
+      });
+      request.on('end', () => {
+        requests.push(JSON.parse(Buffer.concat(chunks).toString()) as Record<string, unknown>);
+        response.setHeader('content-type', 'application/json');
+        response.end(JSON.stringify({ jsonrpc: '2.0', id: 1, result: null }));
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const address = server.address();
+    const port = typeof address === 'object' && address !== null ? address.port : 0;
+
+    try {
+      const node = new HttpSolanaNode({ endpoint: `http://127.0.0.1:${port}` });
+      await node.readBlock(100);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+
+    const parameters = (requests[0]?.params as [number, Record<string, unknown>] | undefined)?.[1];
+    expect(parameters?.maxSupportedTransactionVersion).toBeGreaterThan(1);
+    expect(parameters?.commitment).toBe('finalized');
   });
 });
