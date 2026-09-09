@@ -1,36 +1,31 @@
-import { ed25519 } from '@noble/curves/ed25519.js';
-import { base58 } from '@scure/base';
+import {
+  associatedTokenAccount,
+  buildMessage,
+  createAccountInstruction,
+  createAssociatedTokenAccountInstruction,
+  initializeMintInstruction,
+  MINT_ACCOUNT_BYTES,
+  mintToInstruction,
+  randomKeypair,
+  signTransaction,
+  TOKEN_PROGRAM,
+  transferLamportsInstruction,
+  transferTokenInstruction,
+  type Instruction,
+  type Keypair,
+} from './solana-transactions.js';
 
 /**
- * Enough Solana to send a real transfer, without taking on the web3 SDK.
+ * A real Solana validator, spoken to over the same JSON-RPC surface the adapter uses.
  *
- * The adapter under test speaks raw JSON-RPC on purpose, and adding a large client library so the
- * tests can speak something else would put a second, differently-behaved implementation of the same
- * protocol in the repository. What is actually needed is one instruction from the System Program and
- * the legacy message encoding, which is small enough to write out and read.
- *
- * A legacy message is: a three byte header, a compact array of account keys, the recent blockhash,
- * then a compact array of instructions. Signatures go in front of it. The one subtlety that bites is
- * ordering: writable-signer keys first, then writable, then read-only, and the header counts have to
- * agree with that order or the runtime rejects the transaction as malformed.
+ * `docker run -d -p 8899:8899 anzaxyz/agave:v2.1.14 agave-test-validator` starts one. It is a single
+ * node reaching its own consensus with nobody to disagree, so nothing here exercises a skipped slot,
+ * a fork, or how a public endpoint behaves under rate limiting. Everything else is real: the
+ * validator deserialises the transactions, verifies the ed25519 signatures, runs the SPL Token
+ * program and finalises the slots.
  */
 
-/** Solana named this field, not this codebase, so it is data rather than an identifier. */
-const FAILURE_FIELD = 'err';
-
-const SYSTEM_PROGRAM = '11111111111111111111111111111111';
-const TRANSFER_INSTRUCTION = 2;
-const SIGNATURE_BYTES = 64;
-
-export interface SolanaKeypair {
-  readonly account: string;
-  readonly secretKey: Uint8Array;
-}
-
-export function randomKeypair(): SolanaKeypair {
-  const secretKey = ed25519.utils.randomSecretKey();
-  return { account: base58.encode(ed25519.getPublicKey(secretKey)), secretKey };
-}
+export type SolanaKeypair = Keypair;
 
 class SolanaNodeError extends Error {
   constructor(message: string) {
@@ -38,6 +33,12 @@ class SolanaNodeError extends Error {
     this.name = 'SolanaNodeError';
   }
 }
+
+const FINALISATION_ATTEMPTS = 180;
+const POLL_INTERVAL_MILLISECONDS = 1000;
+
+/** Solana named this field, not this codebase, so it is data rather than an identifier. */
+const FAILURE_FIELD = 'err';
 
 export class SolanaTestNode {
   readonly url: string;
@@ -51,11 +52,11 @@ export class SolanaTestNode {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params: parameters }),
-      signal: AbortSignal.timeout(30_000),
+      signal: AbortSignal.timeout(60_000),
     });
     const body = (await response.json()) as { result?: T; error?: { message?: string } };
     if (body.error !== undefined) {
-      throw new SolanaNodeError(body.error.message ?? method);
+      throw new SolanaNodeError(`${method}: ${body.error.message ?? 'no message'}`);
     }
     return body.result as T;
   }
@@ -81,6 +82,14 @@ export class SolanaTestNode {
     return BigInt(answer.value);
   }
 
+  async tokenBalance(account: string): Promise<bigint> {
+    const answer = await this.call<{ value: { amount: string } }>('getTokenAccountBalance', [
+      account,
+      { commitment: 'confirmed' },
+    ]);
+    return BigInt(answer.value.amount);
+  }
+
   async airdrop(account: string, lamports: bigint): Promise<string> {
     return this.call<string>('requestAirdrop', [account, Number(lamports)]);
   }
@@ -92,22 +101,12 @@ export class SolanaTestNode {
     return answer.value.blockhash;
   }
 
-  async finalizedSlot(): Promise<number> {
-    return this.call<number>('getSlot', [{ commitment: 'finalized' }]);
-  }
-
-  /** Broadcasts and waits until the signature is finalized, so a test never races the validator. */
-  async sendAndFinalize(transaction: Uint8Array): Promise<string> {
-    const signature = await this.call<string>('sendTransaction', [
-      Buffer.from(transaction).toString('base64'),
-      { encoding: 'base64', preflightCommitment: 'confirmed' },
-    ]);
-    await this.awaitFinalized(signature);
-    return signature;
+  async rentExemptLamports(space: number): Promise<bigint> {
+    return BigInt(await this.call<number>('getMinimumBalanceForRentExemption', [space]));
   }
 
   async awaitFinalized(signature: string): Promise<void> {
-    for (let attempt = 0; attempt < 120; attempt += 1) {
+    for (let attempt = 0; attempt < FINALISATION_ATTEMPTS; attempt += 1) {
       const answer = await this.call<{
         value: readonly ({ confirmationStatus?: string; [FAILURE_FIELD]: unknown } | null)[];
       }>('getSignatureStatuses', [[signature], { searchTransactionHistory: true }]);
@@ -119,83 +118,118 @@ export class SolanaTestNode {
       if (status?.confirmationStatus === 'finalized') {
         return;
       }
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+      await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MILLISECONDS));
     }
     throw new SolanaNodeError(`${signature} was not finalized in time`);
   }
 
-  async transferLamports(
-    from: SolanaKeypair,
-    toAccount: string,
-    lamports: bigint,
+  /**
+   * Builds, signs, broadcasts and waits for finalisation, so no test races the validator. Scanning
+   * reads finalized slots only, so a transfer that is merely confirmed is one the system is correct
+   * to be unable to see yet.
+   */
+  async send(
+    payer: Keypair,
+    instructions: readonly Instruction[],
+    extraSigners: readonly Keypair[] = [],
   ): Promise<string> {
-    const message = buildTransferMessage(
-      from.account,
-      toAccount,
-      lamports,
-      await this.latestBlockhash(),
+    const built = buildMessage(payer.account, instructions, await this.latestBlockhash());
+    const wire = signTransaction(built, [payer, ...extraSigners]);
+    const signature = await this.call<string>('sendTransaction', [
+      Buffer.from(wire).toString('base64'),
+      { encoding: 'base64', preflightCommitment: 'confirmed' },
+    ]);
+    await this.awaitFinalized(signature);
+    return signature;
+  }
+
+  async transferLamports(from: Keypair, toAccount: string, lamports: bigint): Promise<string> {
+    return this.send(from, [transferLamportsInstruction(from.account, toAccount, lamports)]);
+  }
+
+  /**
+   * Creates an SPL mint and returns its address.
+   *
+   * Two instructions in one transaction, which is how it is always done: the account has to exist
+   * and be owned by the token program before that program will initialise it, and splitting them
+   * leaves a funded account another transaction could claim in between.
+   */
+  async createMint(payer: Keypair, decimals: number): Promise<string> {
+    const mint = randomKeypair();
+    await this.send(
+      payer,
+      [
+        createAccountInstruction({
+          payer: payer.account,
+          created: mint.account,
+          lamports: await this.rentExemptLamports(MINT_ACCOUNT_BYTES),
+          space: MINT_ACCOUNT_BYTES,
+          owner: TOKEN_PROGRAM,
+        }),
+        initializeMintInstruction({
+          mint: mint.account,
+          decimals,
+          mintAuthority: payer.account,
+        }),
+      ],
+      [mint],
     );
-    return this.sendAndFinalize(signTransaction(message, from));
+    return mint.account;
   }
-}
 
-/** Solana's compact-u16: seven bits per byte, high bit continues. */
-function compactLength(value: number): Uint8Array {
-  const bytes: number[] = [];
-  let remaining = value;
-  for (;;) {
-    const chunk = remaining & 0x7f;
-    remaining >>= 7;
-    if (remaining === 0) {
-      bytes.push(chunk);
-      return Uint8Array.from(bytes);
-    }
-    bytes.push(chunk | 0x80);
+  /** Creates the associated token account for an owner, and returns its address. */
+  async createTokenAccount(payer: Keypair, owner: string, mint: string): Promise<string> {
+    const account = associatedTokenAccount(owner, mint);
+    await this.send(payer, [
+      createAssociatedTokenAccountInstruction({
+        payer: payer.account,
+        associatedAccount: account,
+        owner,
+        mint,
+      }),
+    ]);
+    return account;
   }
-}
 
-function transferData(lamports: bigint): Uint8Array {
-  const data = new Uint8Array(12);
-  const view = new DataView(data.buffer);
-  view.setUint32(0, TRANSFER_INSTRUCTION, true);
-  view.setBigUint64(4, lamports, true);
-  return data;
-}
-
-/**
- * Account order is the part that has to be exactly right: the signer and payer first, then the
- * writable recipient, then the read-only program. The header counts describe that layout, and a
- * mismatch is rejected by the runtime rather than by anything that would say why.
- */
-function buildTransferMessage(
-  fromAccount: string,
-  toAccount: string,
-  lamports: bigint,
-  recentBlockhash: string,
-): Uint8Array {
-  const keys = [fromAccount, toAccount, SYSTEM_PROGRAM].map((key) => base58.decode(key));
-  const data = transferData(lamports);
-
-  return Buffer.concat([
-    // One required signature, no read-only signers, one read-only unsigned account (the program).
-    Uint8Array.from([1, 0, 1]),
-    compactLength(keys.length),
-    ...keys,
-    base58.decode(recentBlockhash),
-    compactLength(1),
-    // Program at index 2, touching accounts 0 and 1, with the transfer payload.
-    Uint8Array.from([2]),
-    compactLength(2),
-    Uint8Array.from([0, 1]),
-    compactLength(data.length),
-    data,
-  ]);
-}
-
-function signTransaction(message: Uint8Array, signer: SolanaKeypair): Uint8Array {
-  const signature = ed25519.sign(message, signer.secretKey);
-  if (signature.length !== SIGNATURE_BYTES) {
-    throw new SolanaNodeError('an ed25519 signature must be sixty-four bytes');
+  async mintTo(
+    authority: Keypair,
+    mint: string,
+    destination: string,
+    amount: bigint,
+  ): Promise<string> {
+    return this.send(authority, [
+      mintToInstruction({ mint, destination, authority: authority.account, amount }),
+    ]);
   }
-  return Buffer.concat([compactLength(1), signature, message]);
+
+  /**
+   * Sends tokens to a wallet, creating the recipient's associated account first when it has none.
+   *
+   * Both instructions ride in one transaction because that is what a wallet does, and because it is
+   * the case the adapter has to get right: what is credited is a token account, and the owner the
+   * node reports for it is the wallet the payment belongs to.
+   */
+  async transferToken(
+    from: Keypair,
+    sourceAccount: string,
+    ownerAccount: string,
+    mint: string,
+    amount: bigint,
+  ): Promise<string> {
+    const destination = associatedTokenAccount(ownerAccount, mint);
+    return this.send(from, [
+      createAssociatedTokenAccountInstruction({
+        payer: from.account,
+        associatedAccount: destination,
+        owner: ownerAccount,
+        mint,
+      }),
+      transferTokenInstruction({
+        source: sourceAccount,
+        destination,
+        owner: from.account,
+        amount,
+      }),
+    ]);
+  }
 }

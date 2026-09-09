@@ -1,7 +1,19 @@
 import { secp256k1 } from '@noble/curves/secp256k1.js';
 import { publicKeyToAddress } from 'viem/utils';
 
-import { encodeTronAddress } from '../../src/infrastructure/chain/tron/address.js';
+import {
+  decodeTronAddress,
+  encodeTronAddress,
+} from '../../src/infrastructure/chain/tron/address.js';
+
+/**
+ * The twenty-one byte payload behind a base58check address, as hex. Re-exported here so a spec
+ * encoding a contract argument reaches for the node helper rather than for the adapter it is
+ * testing, which would make the test agree with the code by construction.
+ */
+export function decodeTronAddressPayload(account: string): string {
+  return decodeTronAddress(account);
+}
 
 /**
  * A real TRON full node, run locally.
@@ -185,7 +197,32 @@ export async function deployContract(
   // The node answers with the twenty-one byte payload as hex even when asked for visible addresses,
   // and every other account in this system is base58. Encoding here keeps the difference in one
   // place rather than in every caller.
-  return encodeTronAddress(address);
+  const account = encodeTronAddress(address);
+  await awaitContract(account);
+  return account;
+}
+
+/**
+ * Waits until the node will answer for the deployed contract.
+ *
+ * A broadcast returns once the transaction is in a block, which is not quite the same moment the
+ * contract becomes callable. Calling it too early answers "No contract or not a valid smart
+ * contract", which reads exactly like a deployment that failed and is not one.
+ */
+const CONTRACT_READY_ATTEMPTS = 60;
+
+async function awaitContract(account: string): Promise<void> {
+  for (let attempt = 0; attempt < CONTRACT_READY_ATTEMPTS; attempt += 1) {
+    const contract = await post<{ bytecode?: string }>('/wallet/getcontract', {
+      value: account,
+      visible: true,
+    });
+    if (typeof contract.bytecode === 'string' && contract.bytecode.length > 0) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
+  throw new TronNodeError(`${account} did not become callable`);
 }
 
 /** Calls a contract method that changes state, waiting for the node to accept the broadcast. */
