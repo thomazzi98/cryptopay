@@ -1,4 +1,4 @@
-import { TOKEN_REGISTRY } from './token-registry.js';
+import { NATIVE_ASSET_REFERENCE, TOKEN_REGISTRY } from './token-registry.js';
 import {
   SOLANA_DEVNET_EXPLORER_BASE_URL,
   SOLANA_DEVNET_GENESIS_IDENTITY,
@@ -403,9 +403,27 @@ export function networksForEnvironment(environment: Environment): readonly Netwo
 export function findAllowedAsset(network: NetworkIdentifier, symbol: string): AllowedAsset | null {
   const configuration = networkConfigurationFor(network);
   const wanted = symbol.trim().toUpperCase();
-  return (
-    configuration.assetAllowlist.find((asset) => asset.symbol.toUpperCase() === wanted) ?? null
-  );
+  const token = configuration.assetAllowlist.find((asset) => asset.symbol.toUpperCase() === wanted);
+  if (token !== undefined) {
+    return configuration.capabilities.supportsTokenPayments ? token : null;
+  }
+
+  // The native currency is not in the allowlist and cannot be: the allowlist exists to match a
+  // contract address in a transfer log, and a native payment has no contract. It is answered here
+  // instead, so that a caller naming POL, TRX or SOL is given the sentinel the rest of the system
+  // already understands rather than being told the chain does not settle its own currency.
+  const native = configuration.nativeCurrency;
+  if (
+    !configuration.capabilities.supportsNativePayments ||
+    native.symbol.toUpperCase() !== wanted
+  ) {
+    return null;
+  }
+  return Object.freeze({
+    reference: NATIVE_ASSET_REFERENCE,
+    symbol: native.symbol,
+    decimals: native.decimals,
+  });
 }
 
 /**
