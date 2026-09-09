@@ -235,8 +235,6 @@ output is invisible is worth nothing.
 
 - A transient DNS failure classifies a callback destination as unreachable and abandons it, where a
   retry would have succeeded.
-- A callback claim is not fenced and does not use `FOR UPDATE SKIP LOCKED`, so two workers can
-  attempt the same delivery; the receiver's own idempotency key is what prevents a duplicate.
 - A payment that re-enters a status after a reorg emits no second callback, so a merchant told
   "completed" and then walked back is not told again when it completes a second time.
 - A transfer that is re-mined after being orphaned keeps its earlier `credited` classification
@@ -256,3 +254,44 @@ output is invisible is worth nothing.
 **Medium, and also open:** no security headers on API responses, no rate limiting, the dashboard's
 Overview KPIs are derived from a single hundred-row page rather than an aggregate, `formatAmount`
 truncates rather than rounds in the dashboard, and retiring a secret has no confirmation step.
+
+**From the hardening audit, verified and still open.** A structured read-only audit of this
+repository produced fifty-eight findings. The ones that could lose or misreport money are fixed and
+have tests: the checkout crash, the amount decimals, the enforced denylist, the duplicate webhook
+claim, the silently skipped EVM block, the key material left unzeroed, and the log redaction that
+only reached the surface. What follows is verified, real, and not fixed.
+
+_Chain reading:_
+
+- Adaptive scan-window narrowing keys on transport failure, so a provider answering HTTP 200 with a
+  JSON-RPC error body never triggers it and the window never narrows.
+- The TRON client treats any HTTP 200 as success and does not inspect TronGrid's in-body `Error`
+  field.
+- EVM reconciliation decides whether to withdraw a credit partly by matching the provider's error
+  text, which is provider-specific and unstable.
+- TRON and Solana reconciliation read "this node does not know that transaction" as orphaned, and
+  re-check every credited transfer indefinitely rather than stopping at finality.
+- A lagging endpoint in the fallback list can halt an EVM network during fork resolution.
+- The finality second opinion can be served by the same endpoint that gave the first, when only one
+  is configured.
+- A stalled finality tag holds, which is correct, but never alerts: the stall detector has no caller.
+
+_Presentation and contract:_
+
+- `sourceAccount` on a Solana transfer is the credited account rather than a payer, published
+  without qualification. Section 10 explains why there is no single sender to name.
+- TRON declares `supportsPaymentUri: true` for a convention rather than a ratified standard.
+- The dashboard sums volume by asset reference alone, so the native currencies of three chains are
+  added together, and `formatAmount` truncates a sub-cent amount of an eighteen-decimal asset to
+  zero.
+
+_Tests that prove less than their names claim:_
+
+- Two resilience sweeps cannot fail: the scanner one never re-runs a scan that writes anything, and
+  the evaluator one stops doing work after the third index because the queue row stays leased.
+- The fencing-token guard on the scanner's write path has no test.
+- Several assertions sit in loops that can execute zero times, or assert a status code the request
+  would return for an unrelated reason.
+
+None of these are hidden behind a passing test that claims otherwise. They are listed because a
+review whose output is invisible is worth nothing.
