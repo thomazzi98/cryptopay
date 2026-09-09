@@ -156,15 +156,19 @@ length 32 to 44, because separating a thirty-two byte payload from TRON's twenty
 requires decoding base58, and a decoder written in SQL to guard rows this system generates itself
 would add more risk than the check removes.
 
-The residual gap is therefore precise: **a thirty-four character Solana address beginning with `T`
-would satisfy the TRON rule.** Such an address is legal and possible, if rare. It is not reachable
-today, because every account written to these tables is derived by this system under a known family
-rather than supplied by anyone, and the application asserts the byte length where it can decode. If
-merchant-supplied destinations are ever accepted, this check must be replaced by a real decode
-before that feature ships, not after.
+The application layer is stronger than the database, and deliberately so. `isCanonicalAccount`
+decodes base58 and requires a Solana account to be exactly thirty-two bytes, which rejects a TRON
+address outright: TRON is a twenty-five byte base58check payload written in thirty-four characters,
+and that length sits inside the range a thirty-two byte key occupies, so the two can only be told
+apart by what they decode to. Decoding needs arbitrary-precision arithmetic and no hash, so the
+shared module stays dependency free and safe for the browser bundle.
 
-The reverse direction — a TRON address stored on a Solana network — is now rejected outright, which
-was not true before migration 0015.
+The residual gap is therefore confined to SQL, and is precise: **a thirty-four character Solana
+address beginning with `T` would satisfy the TRON rule in the database.** Such an address is legal
+and possible, if rare. It is not reachable today, because every account written to these tables is
+derived by this system under a known family rather than supplied by anyone, and passes through
+`canonicaliseAccount` on the way. If merchant-supplied destinations are ever accepted, the SQL check
+must be replaced by a real decode before that feature ships, not after.
 
 ## 9. Custody, and what deliberately does not exist
 

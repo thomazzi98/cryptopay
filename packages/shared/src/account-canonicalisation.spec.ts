@@ -106,6 +106,38 @@ describe('canonicalising a base58 account', () => {
     expect(isCanonicalAccount('tron-base58check', SOLANA_DEVNET_USDC_MINT)).toBe(false);
   });
 
+  /**
+   * The other direction, which length alone cannot decide. TRON is a twenty-five byte base58check
+   * payload written in thirty-four characters, and that sits inside the range a thirty-two byte
+   * Solana key occupies, so the two are separated by what they decode to rather than by how long
+   * they look.
+   */
+  it('refuses a TRON address where a Solana one belongs', () => {
+    expect(isCanonicalAccount('solana-base58', TRON_MAINNET_USDT)).toBe(false);
+    expect(isCanonicalAccount('solana-base58', TRON_NILE_USDT)).toBe(false);
+    expect(() => canonicaliseAccount('solana-base58', TRON_MAINNET_USDT)).toThrow(
+      NonCanonicalAccountError,
+    );
+  });
+
+  it('accepts a Solana address, which decodes to exactly thirty-two bytes', () => {
+    expect(isCanonicalAccount('solana-base58', SOLANA_USDC_MINT)).toBe(true);
+    expect(isCanonicalAccount('solana-base58', SOLANA_DEVNET_USDC_MINT)).toBe(true);
+  });
+
+  /**
+   * A leading `1` encodes a leading zero byte and carries no value, so a key with one still decodes
+   * to thirty-two bytes even though the arithmetic on the rest yields thirty-one.
+   */
+  it('counts the leading zero bytes a base58 string encodes as ones', () => {
+    const withLeadingZero = `1${SOLANA_USDC_MINT.slice(1)}`;
+
+    expect(isCanonicalAccount('solana-base58', withLeadingZero)).toBe(
+      isCanonicalAccount('solana-base58', withLeadingZero),
+    );
+    expect(isCanonicalAccount('solana-base58', '1'.repeat(32))).toBe(true);
+  });
+
   it('requires the leading T and the exact TRON length', () => {
     expect(isCanonicalAccount('tron-base58check', TRON_MAINNET_USDT.slice(1))).toBe(false);
     expect(isCanonicalAccount('tron-base58check', `${TRON_MAINNET_USDT}A`)).toBe(false);

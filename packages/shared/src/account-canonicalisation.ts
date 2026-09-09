@@ -31,6 +31,50 @@ const TRON_ACCOUNT_PATTERN = /^T[1-9A-HJ-NP-Za-km-z]{33}$/;
 const BASE58_ACCOUNT_MINIMUM = 32;
 const BASE58_ACCOUNT_MAXIMUM = 44;
 
+const BASE58_ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+const BASE58_RADIX = 58n;
+const BITS_PER_BYTE = 8n;
+
+/** An ed25519 public key, which is what a Solana address is: no prefix, no checksum, no hash. */
+const SOLANA_ACCOUNT_BYTES = 32;
+
+/**
+ * How many bytes a base58 string decodes to, or -1 when it is not base58 at all.
+ *
+ * Length in characters cannot separate a TRON address from a Solana one: TRON is a twenty-five byte
+ * base58check payload written in thirty-four characters, which sits inside the thirty-two to
+ * forty-four a thirty-two byte Solana key occupies. Both are base58 and both are accounts, and a
+ * payment sent to the wrong chain's address is unrecoverable, so the shapes have to be told apart by
+ * what they decode to rather than by how long they look.
+ *
+ * Decoding needs arbitrary-precision arithmetic and no hash, so this module stays dependency free
+ * and remains safe for the browser bundle. A leading `1` encodes a leading zero byte and carries no
+ * value, which is why those are counted separately rather than multiplied in.
+ */
+function base58ByteLength(value: string): number {
+  let leadingZeroBytes = 0;
+  while (leadingZeroBytes < value.length && value[leadingZeroBytes] === '1') {
+    leadingZeroBytes += 1;
+  }
+
+  let decoded = 0n;
+  for (const character of value) {
+    const digit = BASE58_ALPHABET.indexOf(character);
+    if (digit === -1) {
+      return -1;
+    }
+    decoded = decoded * BASE58_RADIX + BigInt(digit);
+  }
+
+  let significantBytes = 0;
+  let remaining = decoded;
+  while (remaining > 0n) {
+    remaining >>= BITS_PER_BYTE;
+    significantBytes += 1;
+  }
+  return leadingZeroBytes + significantBytes;
+}
+
 const BARE_HEX_REFERENCE_PATTERN = /^[\da-f]{64}$/;
 const BASE58_REFERENCE_MINIMUM = 64;
 const BASE58_REFERENCE_MAXIMUM = 90;
@@ -58,11 +102,14 @@ export function isCanonicalAccount(form: AddressForm, value: string): boolean {
   if (form === 'tron-base58check') {
     return TRON_ACCOUNT_PATTERN.test(value);
   }
-  return (
-    value.length >= BASE58_ACCOUNT_MINIMUM &&
-    value.length <= BASE58_ACCOUNT_MAXIMUM &&
-    BASE58_PATTERN.test(value)
-  );
+  const withinLength =
+    value.length >= BASE58_ACCOUNT_MINIMUM && value.length <= BASE58_ACCOUNT_MAXIMUM;
+  if (!withinLength || !BASE58_PATTERN.test(value)) {
+    return false;
+  }
+  // Decoded rather than measured, so a TRON address is rejected here rather than accepted as a
+  // Solana one it merely resembles.
+  return base58ByteLength(value) === SOLANA_ACCOUNT_BYTES;
 }
 
 /**
