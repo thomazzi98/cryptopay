@@ -1,9 +1,12 @@
-import { TRON_NILE_GENESIS_IDENTITY, USDT_TRON_NILE_ADDRESS } from '@cryptopay/shared';
+import {
+  NATIVE_ASSET_REFERENCE,
+  TRON_NILE_GENESIS_IDENTITY,
+  USDT_TRON_NILE_ADDRESS,
+} from '@cryptopay/shared';
 import { beforeAll, describe, expect, it } from 'vitest';
 
 import { LedgerIdentityMismatchError } from '../../src/application/ports/chain-gateway.port.js';
 import { networkConfigurationFor } from '../../src/infrastructure/chain/network-configuration.js';
-import { NATIVE_ASSET_REFERENCE } from '../../src/infrastructure/chain/token-registry.js';
 import { TronChainGateway } from '../../src/infrastructure/chain/tron/tron-chain-gateway.js';
 import { HttpTronNode } from '../../src/infrastructure/chain/tron/tron-client.js';
 

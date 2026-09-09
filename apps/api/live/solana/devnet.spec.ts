@@ -1,9 +1,8 @@
-import { SOLANA_DEVNET_GENESIS_IDENTITY } from '@cryptopay/shared';
+import { NATIVE_ASSET_REFERENCE, SOLANA_DEVNET_GENESIS_IDENTITY } from '@cryptopay/shared';
 import { beforeAll, describe, expect, it } from 'vitest';
 
 import { LedgerIdentityMismatchError } from '../../src/application/ports/chain-gateway.port.js';
 import { networkConfigurationFor } from '../../src/infrastructure/chain/network-configuration.js';
-import { NATIVE_ASSET_REFERENCE } from '../../src/infrastructure/chain/token-registry.js';
 import { SolanaChainGateway } from '../../src/infrastructure/chain/solana/solana-chain-gateway.js';
 import { HttpSolanaNode } from '../../src/infrastructure/chain/solana/solana-client.js';
 

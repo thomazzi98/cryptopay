@@ -10,6 +10,6 @@
     // failing at runtime, months later, as a confusing NaN.
     "rootDir": "."
   },
-  "include": ["src/**/*.ts", "test/**/*.ts"],
+  "include": ["src/**/*.ts", "test/**/*.ts", "live/**/*.ts"],
   "exclude": []
 }
