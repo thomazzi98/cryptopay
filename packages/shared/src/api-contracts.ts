@@ -478,6 +478,18 @@ export const NetworkDescriptorSchema = z
       description:
         'Every asset this deployment credits on this network, identified by contract address. An asset absent from this list is never credited, whatever symbol it reports.',
     }),
+    scan: z
+      .object({
+        lastScannedHeight: BlockHeightSchema,
+        finalizedHeight: BlockHeightSchema.nullable(),
+        halted: z.boolean(),
+        haltedReason: z.string().nullable(),
+        updatedAt: z.iso.datetime(),
+      })
+      .meta({
+        description:
+          'Where the scanner has reached on this network. A halted network is the failure that is otherwise invisible: payments keep being created and nothing is ever detected.',
+      }),
     explorerBaseUrl: z.string(),
     walletRpcUrl: z.url().nullable().meta({
       description:

@@ -6,7 +6,10 @@ import {
   networksForEnvironment,
   type NetworkConfiguration,
 } from '../../infrastructure/chain/network-configuration.js';
-import type { BlockCursorRepository } from '../../infrastructure/persistence/block-cursor.repository.js';
+import type {
+  BlockCursor,
+  BlockCursorRepository,
+} from '../../infrastructure/persistence/block-cursor.repository.js';
 import { requireMerchant, type AuthenticationHook } from '../authentication.js';
 import type { ApplicationServer } from '../server-types.js';
 
@@ -28,7 +31,11 @@ export interface NetworkRouteDependencies {
   readonly blockCursorRepository: BlockCursorRepository;
 }
 
-function describe(configuration: Configuration, network: NetworkConfiguration): NetworkDescriptor {
+function describe(
+  configuration: Configuration,
+  network: NetworkConfiguration,
+  cursor: BlockCursor,
+): NetworkDescriptor {
   return {
     network: network.networkIdentifier,
     chainIdentifier: network.evmChainId,
@@ -46,6 +53,13 @@ function describe(configuration: Configuration, network: NetworkConfiguration): 
       symbol: asset.symbol,
       decimals: asset.decimals,
     })),
+    scan: {
+      lastScannedHeight: cursor.lastScannedHeight.toString(),
+      finalizedHeight: cursor.finalizedHeight?.toString() ?? null,
+      halted: cursor.haltedAt !== null,
+      haltedReason: cursor.haltedReason,
+      updatedAt: cursor.updatedAt.toISOString(),
+    },
     explorerBaseUrl: network.explorerBaseUrl,
     walletRpcUrl: walletRpcUrlFor(configuration, network.networkIdentifier),
   };
@@ -58,12 +72,18 @@ export function registerNetworkRoutes(
   server.get('/v1/networks', { preHandler: dependencies.authenticate }, async (request, reply) => {
     const authenticated = requireMerchant(request);
     const cursors = await dependencies.blockCursorRepository.findAll();
-    const watched = new Set(cursors.map((cursor) => cursor.networkIdentifier));
+    const byNetwork = new Map(cursors.map((cursor) => [cursor.networkIdentifier, cursor]));
 
+    // Only networks a scanner has actually reached are listed. A network nobody watches would be
+    // offered as a payment option and then never detect one, which is worse than not offering it.
     const body: NetworkList = {
-      data: networksForEnvironment(authenticated.environment)
-        .filter((network) => watched.has(network.networkIdentifier))
-        .map((network) => describe(dependencies.configuration, network)),
+      data: networksForEnvironment(authenticated.environment).flatMap((network) => {
+        const cursor = byNetwork.get(network.networkIdentifier);
+        if (cursor === undefined) {
+          return [];
+        }
+        return [describe(dependencies.configuration, network, cursor)];
+      }),
     };
     await reply.code(200).send(body);
   });

@@ -14,6 +14,7 @@ import { classNames } from '@/lib/class-names';
 const SECTIONS = [
   { href: '/dashboard', label: 'Overview' },
   { href: '/dashboard/payments', label: 'Payments' },
+  { href: '/dashboard/networks', label: 'Networks' },
   { href: '/dashboard/settlement', label: 'Settlement' },
   { href: '/dashboard/webhooks', label: 'Webhooks' },
   { href: '/dashboard/simulator', label: 'Simulator' },
