@@ -72,3 +72,31 @@ instead is equivalent to a factory reset of Docker.
 Docker is required for `docker compose up` and for the Postgres that integration tests use. It is
 **not** required for unit tests or for the local Anvil chain, which runs as a native binary. The
 preflight reports a missing daemon as a warning rather than a failure for exactly that reason.
+
+## Local TRON and Solana nodes
+
+The suites under `apps/api/local` drive real payments against real nodes of each chain's own
+software. They skip themselves, loudly and by name, when no node answers, so nothing here is
+required to run the rest of the tests.
+
+```bash
+docker run -d -p 9090:9090 --name cryptopay-tre tronbox/tre
+docker run -d -p 8899:8899 --name cryptopay-solana anzaxyz/agave:v2.1.14 agave-test-validator
+
+npm run test:tron-local
+npm run test:solana-local
+```
+
+Both take a few minutes to become ready on first start: java-tron builds its database and the
+validator runs a genesis. Wait for `/wallet/getnowblock` and `getVersion` respectively rather than
+guessing.
+
+**Run them one at a time.** Each is a full consensus node, and a machine also running PostgreSQL and
+a test runner does not have room for both. Running them together is what produced a suite full of
+request timeouts that looked like adapter faults and were not.
+
+The TRON suite is slow for a reason that cannot be engineered away: a witness produces a block only
+when there is a transaction to put in it, `broadcasttransaction` does not return until that block
+exists, and TRON policy is nineteen confirmations. A payment reaching completion therefore costs
+about two minutes of real block production. That determinism is worth the wait, because a
+confirmation count is exact rather than a race against a timer.
