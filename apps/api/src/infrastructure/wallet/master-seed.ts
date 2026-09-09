@@ -101,7 +101,17 @@ export function openSeed(
     });
     decipher.setAAD(additionalData);
     decipher.setAuthTag(sealed.authenticationTag);
-    return Buffer.concat([decipher.update(sealed.ciphertext), decipher.final()]);
+    // Bound rather than inlined into `Buffer.concat`, because concat copies and the buffer that
+    // `update` returns already holds the whole plaintext seed. Leaving it unbound left one un-zeroed
+    // copy of the master seed on the heap for every seed that was ever opened.
+    const head = decipher.update(sealed.ciphertext);
+    const tail = decipher.final();
+    try {
+      return Buffer.concat([head, tail]);
+    } finally {
+      zeroBuffer(head);
+      zeroBuffer(tail);
+    }
   } catch (error) {
     if (error instanceof KeyWrappingError) {
       throw error;

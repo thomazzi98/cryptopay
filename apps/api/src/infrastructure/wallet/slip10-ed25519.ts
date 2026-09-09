@@ -37,9 +37,21 @@ export class Slip10Error extends Error {
   }
 }
 
+/**
+ * Splits an HMAC digest into a key and a chain code, then clears the digest.
+ *
+ * `slice` copies rather than views, so without this the sixty-four bytes holding the key and the
+ * chain code together survive every attempt to zero the halves. That made the promise below, and
+ * the one in the ed25519 allocator, untrue for the master node and for every intermediate.
+ */
+function splitAndClear(digest: Uint8Array): ExtendedKey {
+  const extended = { privateKey: digest.slice(0, KEY_BYTES), chainCode: digest.slice(KEY_BYTES) };
+  digest.fill(0);
+  return extended;
+}
+
 export function masterKeyFromSeed(seed: Uint8Array): ExtendedKey {
-  const digest = hmac(sha512, new TextEncoder().encode(MASTER_KEY_LABEL), seed);
-  return { privateKey: digest.slice(0, KEY_BYTES), chainCode: digest.slice(KEY_BYTES) };
+  return splitAndClear(hmac(sha512, new TextEncoder().encode(MASTER_KEY_LABEL), seed));
 }
 
 /**
@@ -55,7 +67,7 @@ function deriveHardenedChild(parent: ExtendedKey, index: number): ExtendedKey {
 
   const digest = hmac(sha512, parent.chainCode, data);
   data.fill(0);
-  return { privateKey: digest.slice(0, KEY_BYTES), chainCode: digest.slice(KEY_BYTES) };
+  return splitAndClear(digest);
 }
 
 /**

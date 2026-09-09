@@ -100,7 +100,16 @@ export function createLocalKeyWrapper(keyEncryptionKey: Buffer, keyIdentifier: s
       decipher.setAuthTag(authenticationTag);
 
       try {
-        return Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+        // Bound for the same reason the seed is: concat copies, and what `update` returns already
+        // holds the whole unwrapped data key.
+        const head = decipher.update(ciphertext);
+        const tail = decipher.final();
+        try {
+          return Buffer.concat([head, tail]);
+        } finally {
+          zeroBuffer(head);
+          zeroBuffer(tail);
+        }
       } catch {
         // The message is deliberately uninformative: distinguishing a wrong key from wrong
         // additional data tells an attacker which half of the guess was right.
