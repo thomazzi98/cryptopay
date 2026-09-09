@@ -23,6 +23,8 @@ import { ConfirmationMeter } from './confirmation-meter';
 import { ExpiryCountdown } from './expiry-countdown';
 import { readCheckout } from './read-checkout';
 import { walletConfiguration } from './wallet-configuration';
+import { walletPanelApplies } from '@/lib/account-display';
+
 import { WalletPanel } from './wallet-panel';
 
 /**
@@ -197,7 +199,9 @@ function CheckoutScreen({
 
       {scanPanel}
 
-      <WalletPanel checkout={checkout} checkoutToken={checkoutToken} />
+      {walletPanelApplies(checkout.networkFamily, checkout.asset.reference) && (
+        <WalletPanel checkout={checkout} checkoutToken={checkoutToken} />
+      )}
 
       <Card>
         <CardHeader

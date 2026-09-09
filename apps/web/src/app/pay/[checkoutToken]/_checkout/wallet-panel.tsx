@@ -173,6 +173,9 @@ export function WalletPanel({
     recallBroadcast(`cryptopay:broadcast:${checkoutToken}`),
   );
 
+  // Safe because the panel is rendered only where `walletPanelApplies` is true, which is an EVM
+  // token payment and nothing else. Calling these on a base58 account or on the `native` sentinel
+  // throws, which is how this panel used to take the whole checkout page down.
   const tokenAddress = getAddress(checkout.asset.reference);
   const recipient = getAddress(checkout.receivingAccount);
   const requestedBaseUnits = BigInt(checkout.requestedAmount.baseUnits);

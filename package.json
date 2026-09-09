@@ -22,7 +22,7 @@
   "scripts": {
     "preflight": "node scripts/preflight.mjs",
     "typecheck": "npm run typecheck --workspaces --if-present && tsc -p e2e/tsconfig.json --noEmit",
-    "test": "vitest run --project shared --project api --project tools",
+    "test": "vitest run --project shared --project api --project web --project tools",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
@@ -30,7 +30,7 @@
     "knip": "knip",
     "prepare": "node scripts/install-git-hooks.mjs",
     "build": "tsc --build",
-    "test:coverage": "vitest run --coverage --project shared --project api --project api-integration --project tools",
+    "test:coverage": "vitest run --coverage --project shared --project api --project web --project api-integration --project tools",
     "docs:generate": "node scripts/verify-docs.mjs --write",
     "docs:check": "node scripts/verify-docs.mjs",
     "test:integration": "vitest run --project api-integration",

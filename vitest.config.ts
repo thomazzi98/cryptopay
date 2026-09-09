@@ -75,6 +75,16 @@ export default defineConfig({
       },
       {
         test: {
+          // The dashboard and checkout are covered end to end by Playwright, but the decisions that
+          // broke the checkout page were pure functions applied to checkout data. A pure function
+          // deserves a pure test, and this project needs no DOM to run one.
+          name: 'web',
+          root: './apps/web',
+          include: ['src/lib/**/*.spec.ts'],
+        },
+      },
+      {
+        test: {
           name: 'tools',
           include: ['tools/**/*.spec.mjs'],
           // Each assertion boots ESLint against the real flat config and resolves every plugin.

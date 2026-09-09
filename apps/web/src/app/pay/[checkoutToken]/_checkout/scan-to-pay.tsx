@@ -1,5 +1,4 @@
-import { getAddress } from 'viem';
-
+import { describeAsset, toDisplayAccount } from '@/lib/account-display';
 import { Card, CardBody, CardHeader } from '@/components/ui/surfaces';
 import { Copyable } from '@/components/ui/data';
 import { formatExactAmount } from '@/lib/format';
@@ -42,8 +41,9 @@ export function ScanToPay({
   const matrix = encodeQrMatrix(paymentUri);
   const extent = matrix.size + QUIET_ZONE_MODULES * 2;
   const path = toSvgPath(matrix.size, matrix.modules);
-  const displayAddress = getAddress(checkout.receivingAccount);
+  const displayAddress = toDisplayAccount(checkout.receivingAccount);
   const exactAmount = formatExactAmount(checkout.requestedAmount.display);
+  const asset = describeAsset(checkout.asset.reference, checkout.asset.symbol);
 
   return (
     <Card>
@@ -86,13 +86,17 @@ export function ScanToPay({
           </p>
           <p className="mt-1 text-xs text-text-muted">
             {checkout.requestedAmount.baseUnits} base units, {checkout.asset.decimals.toString()}{' '}
-            decimals. Send the asset at this contract, not another token with the same symbol.
+            decimals.{' '}
+            {asset.isNative
+              ? 'Send the currency the network itself runs on, not a token that shares its name.'
+              : 'Send the asset at this contract, not another token with the same symbol.'}
           </p>
           <div className="mt-1">
-            <Copyable
-              value={checkout.asset.reference}
-              display={`token ${getAddress(checkout.asset.reference)}`}
-            />
+            {asset.isNative ? (
+              <p className="font-mono text-xs text-text-muted">{asset.label}</p>
+            ) : (
+              <Copyable value={checkout.asset.reference} display={asset.label} />
+            )}
           </div>
         </div>
 
