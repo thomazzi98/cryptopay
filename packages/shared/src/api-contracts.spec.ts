@@ -14,6 +14,7 @@ import {
   PaymentSchema,
   ProblemDetailsSchema,
   TransactionHintRequestSchema,
+  TransactionReferenceSchema,
 } from './api-contracts.js';
 
 const VALID_IDENTIFIER = 'pay_01K4QW6ZR2M8X4T7YQ0C3D5B9N';
@@ -357,5 +358,55 @@ describe('problem details', () => {
     };
     expect(ProblemDetailsSchema.safeParse({ ...base, status: 200 }).success).toBe(false);
     expect(ProblemDetailsSchema.safeParse({ ...base, status: 600 }).success).toBe(false);
+  });
+});
+
+/**
+ * The contract has to be able to describe every network the product settles on.
+ *
+ * It could not. `AccountSchema` and `TransactionReferenceSchema` were EVM-only patterns, and the
+ * hosted checkout parses every response against this contract before rendering it, so a TRON or
+ * Solana payment reached the customer as "a checkout this page could not read". A payment the
+ * product can create and detect but cannot show anybody is not a payment.
+ */
+describe('describing an account on every family', () => {
+  it.each([
+    ['a Polygon address', '0x7b1a4e6c0f9d2a3b5c8e1f04a6d7b9c2e3f10a4d'],
+    ['a TRON address', 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t'],
+    ['a Solana address', '9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM'],
+  ])('accepts %s', (_label, account) => {
+    expect(AccountSchema.safeParse(account).success).toBe(true);
+  });
+
+  it.each([
+    ['a checksummed EVM address, which must be lowercased first', VALID_ACCOUNT.toUpperCase()],
+    ['an EVM address of the wrong length', '0xabc'],
+    ['base58 too short to be any account', 'abc'],
+    ['a string containing characters base58 omits', '9WzDXwBbmkg8ZTbNM0OIl1xvQRAyrZzDsGYdLVL9'],
+    ['empty', ''],
+  ])('refuses %s', (_label, account) => {
+    expect(AccountSchema.safeParse(account).success).toBe(false);
+  });
+});
+
+describe('describing a transaction on every family', () => {
+  it.each([
+    ['a Polygon hash', '0x570a7a56d0b465f9c4b7a84cc581da427b8460c2244326fa7262ec3c540c1b11'],
+    ['a TRON transaction id', 'f0718be7e2f71a893c06d634382554a24c862bc54ab26cdb8224deff5f629802'],
+    [
+      'a Solana signature',
+      '23XfW1pvgFCsiVNr4WHZwSpyK7grrk6Ao4wbAKK6mbHwocyAr57TdVtjQQjg4hJN7fcfdvMWaVx2obwujA1uTLyP',
+    ],
+  ])('accepts %s', (_label, reference) => {
+    expect(TransactionReferenceSchema.safeParse(reference).success).toBe(true);
+  });
+
+  it.each([
+    ['a hash of the wrong length', '0xdeadbeef'],
+    ['an uppercase EVM hash', `0x${'A'.repeat(64)}`],
+    ['an account, which is not a transaction', '0x7b1a4e6c0f9d2a3b5c8e1f04a6d7b9c2e3f10a4d'],
+    ['empty', ''],
+  ])('refuses %s', (_label, reference) => {
+    expect(TransactionReferenceSchema.safeParse(reference).success).toBe(false);
   });
 });

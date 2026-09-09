@@ -1,5 +1,6 @@
 import {
   buildPaymentUri,
+  CheckoutSchema,
   type Checkout,
   type Environment,
   type GatewayError,
@@ -371,4 +372,28 @@ describe('one payment URI, whichever surface asks for it', () => {
       expect(rebuilt).toBe(payment.paymentUri);
     },
   );
+
+  /**
+   * The hosted checkout parses every response against the published contract before rendering it,
+   * and reports one that does not match as unreadable rather than showing an unvalidated amount.
+   * That is the right behaviour, and it meant an account schema describing only EVM addresses took
+   * the entire checkout page away from two of the three families. Asserting the real response
+   * against the real schema is what catches that; asserting the status code does not.
+   */
+  it.each(FAMILIES)('serves a $family checkout the published contract can read', async (family) => {
+    const created = await create(family.family, family.nativeCurrency);
+    const payment = created.json<GatewayPayment>();
+    const token = await pool.query<{ checkout_token: string }>(
+      'SELECT checkout_token FROM payments WHERE id = $1',
+      [payment.id],
+    );
+    const viewed = await server.inject({
+      method: 'GET',
+      url: `/v1/checkout/${token.rows[0]?.checkout_token ?? ''}`,
+    });
+
+    const parsed = CheckoutSchema.safeParse(viewed.json());
+    expect(parsed.error?.issues ?? []).toEqual([]);
+    expect(parsed.success).toBe(true);
+  });
 });

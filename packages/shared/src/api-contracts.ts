@@ -23,8 +23,19 @@ import { SETTLEMENT_STATUSES } from './settlement-status.js';
 const ULID_PATTERN = /^[\dABCDEFGHJKMNPQRSTVWXYZ]{26}$/;
 const BASE_UNITS_PATTERN = /^\d+$/;
 const DECIMAL_AMOUNT_PATTERN = /^\d+(?:\.\d+)?$/;
-const LOWERCASE_ADDRESS_PATTERN = /^0x[\da-f]{40}$/;
-const TRANSACTION_REFERENCE_PATTERN = /^0x[\da-f]{64}$/;
+/**
+ * An account on any supported family, and a transaction named the way its own chain names it.
+ *
+ * These were EVM-only, which made the contract unable to describe two thirds of the networks the
+ * product settles on. The hosted checkout parses every response against this contract, so a TRON or
+ * Solana payment was reported to the customer as a checkout the page could not read.
+ *
+ * A wire schema asserts plausibility across the families; exactness per network belongs to the
+ * database CHECK and to `canonicaliseAccount`, both of which know which chain they are looking at
+ * and neither of which a caller can bypass.
+ */
+const ACCOUNT_PATTERN = /^(?:0x[\da-f]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})$/;
+const TRANSACTION_REFERENCE_PATTERN = /^(?:0x[\da-f]{64}|[\da-f]{64}|[1-9A-HJ-NP-Za-km-z]{64,90})$/;
 
 const IPV4_HOSTNAME_PATTERN = /^\d{1,3}(?:\.\d{1,3}){3}$/;
 const MAXIMUM_CALLBACK_URL_LENGTH = 2048;
@@ -141,15 +152,16 @@ export const PaymentStatusSchema = z
     description: 'Lifecycle status. See docs/state-machine.md for the transition table.',
   });
 
-export const AccountSchema = z.string().regex(LOWERCASE_ADDRESS_PATTERN).meta({
-  description: 'A blockchain account, always lowercase. Checksum it for display, never to compare.',
+export const AccountSchema = z.string().regex(ACCOUNT_PATTERN).meta({
+  description:
+    'A blockchain account, written the way its own chain writes one. EVM addresses are lowercase hex and should be checksummed for display, never to compare. TRON and Solana addresses are base58 and case significant: lowercasing one produces a different string that nobody holds a key for.',
   example: '0x7b1a4e6c0f9d2a3b5c8e1f04a6d7b9c2e3f10a4d',
 });
 
-export const TransactionReferenceSchema = z
-  .string()
-  .regex(TRANSACTION_REFERENCE_PATTERN)
-  .meta({ description: 'Transaction hash on an EVM network' });
+export const TransactionReferenceSchema = z.string().regex(TRANSACTION_REFERENCE_PATTERN).meta({
+  description:
+    'How the chain names this transaction. Polygon calls it a transaction hash and prefixes it with 0x; TRON calls it a transaction id and writes the same thirty-two bytes bare; Solana calls it a signature and writes sixty-four bytes in base58. They are not the same thing under three names, so the field is named for what it does rather than for what one chain calls it.',
+});
 
 export const BlockHeightSchema = z
   .string()
