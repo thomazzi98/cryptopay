@@ -455,8 +455,14 @@ export async function composeSettlementWorker(
   const leaseRepository = new LeaderLeaseRepository(databasePool);
   const ulidFactory = new UlidFactory();
 
+  // Settlement signs and broadcasts, and only the EVM family has a broadcaster. Filtering on the
+  // capability rather than on configuration is what stops a deployment that watches Solana from
+  // crashing this worker at startup: without it every configured network was handed to an EVM
+  // broadcaster, and the first non-EVM one threw while asking for a numeric chain id it has none of.
   const eligible = Object.values(NETWORK_CONFIGURATIONS).filter(
-    (network) => rpcUrlsFor(configuration, network.networkIdentifier).length > 0,
+    (network) =>
+      network.capabilities.supportsSettlement &&
+      rpcUrlsFor(configuration, network.networkIdentifier).length > 0,
   );
 
   const workers = await Promise.all(

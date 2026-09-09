@@ -19,8 +19,6 @@ export interface RetryPolicy {
   readonly maximumAgeInSeconds: number;
   /** A `4xx` other than 429 usually means the endpoint will never accept this, so it gives up early. */
   readonly clientErrorAttemptCeiling: number;
-  /** How many times a 429 may defer without the deferral counting as an attempt. */
-  readonly rateLimitFreeDeferrals: number;
 }
 
 /**
@@ -35,7 +33,6 @@ export const LIVE_RETRY_POLICY: RetryPolicy = Object.freeze({
   ]),
   maximumAgeInSeconds: 259_200,
   clientErrorAttemptCeiling: 8,
-  rateLimitFreeDeferrals: 3,
 });
 
 /** Six attempts across about twenty-two minutes, so a test can watch a delivery give up. */
@@ -43,7 +40,6 @@ export const TEST_RETRY_POLICY: RetryPolicy = Object.freeze({
   delaysInSeconds: Object.freeze([1, 5, 30, 120, 600]),
   maximumAgeInSeconds: 3600,
   clientErrorAttemptCeiling: 4,
-  rateLimitFreeDeferrals: 2,
 });
 
 /**

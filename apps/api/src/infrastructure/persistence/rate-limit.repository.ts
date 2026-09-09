@@ -12,6 +12,9 @@ import type { Pool } from 'pg';
  * under the limit. The database resolves that by making the increment atomic.
  */
 
+/** How often the counting path sweeps closed windows. Prime-ish and large: this is housekeeping. */
+const SWEEP_EVERY_REQUESTS = 997;
+
 export interface RateLimitVerdict {
   readonly allowed: boolean;
   readonly count: number;
@@ -61,6 +64,17 @@ export class RateLimitRepository {
       return { allowed: false, count: 0, limit, retryAfterSeconds: windowSeconds };
     }
 
+    // Swept from the counting path on roughly one request in a thousand. Cheap enough to be
+    // invisible, frequent enough that the table cannot grow without bound, and it needs no
+    // scheduler. A failure here must never fail the request that triggered it.
+    if (row.request_count % SWEEP_EVERY_REQUESTS === 0) {
+      try {
+        await this.removeExpiredWindows(windowSeconds);
+      } catch {
+        // Housekeeping must never fail the request that triggered it.
+      }
+    }
+
     return {
       allowed: row.request_count <= limit,
       count: row.request_count,
@@ -70,8 +84,12 @@ export class RateLimitRepository {
   }
 
   /**
-   * Removes windows that have closed. Called occasionally rather than on a schedule, because the
-   * table is small by construction and a background job would be a process to operate for no gain.
+   * Removes windows that have closed.
+   *
+   * Called from the counting path itself, on a small fraction of requests, rather than from a
+   * schedule: the table is tiny by construction and a background job would be another process to
+   * operate. It was previously called from nowhere at all while two comments claimed otherwise, so
+   * the table grew one row per key per window forever.
    */
   async removeExpiredWindows(windowSeconds: number): Promise<number> {
     const result = await this.pool.query(

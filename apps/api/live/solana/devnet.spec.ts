@@ -84,13 +84,46 @@ describe('the devnet as the adapter sees it', () => {
    * rather than asserted. A window of slots contains fewer blocks than slots, so an adapter that
    * expected one block per slot would treat an ordinary window as missing data.
    */
-  it('sees fewer produced blocks than slots, because slots really are skipped', () => {
+  it('reads only the slots that produced a block, and names them', () => {
     expect(window.headers.length).toBeGreaterThan(0);
-    expect(window.headers.length).toBeLessThanOrEqual(5);
+    // Every header carries the slot it came from, and each is inside the window that was asked for.
+    for (const header of window.headers) {
+      expect(header.position.height).toBeGreaterThanOrEqual(finalizedSlot - 4n);
+      expect(header.position.height).toBeLessThanOrEqual(finalizedSlot);
+    }
     expect(window.scannedThrough.position.height).toBeLessThanOrEqual(finalizedSlot);
     // Nobody paid that address in this window, which is the expected answer and still exercises the
     // whole read path.
     expect(window.transfers).toEqual([]);
+  });
+
+  /**
+   * The adapter asks which slots produced a block rather than assuming every slot did.
+   *
+   * Deliberately NOT asserting that slots are skipped right now. Skipping is intermittent: a
+   * healthy devnet often produces a block in every slot of a span, and this very assertion failed
+   * against a 250-slot window in which all 251 slots produced one. A test that demanded a gap would
+   * be asserting a property of the network's mood rather than of this code, and would fail on a
+   * good day.
+   *
+   * What is asserted is the contract the adapter depends on: the node returns the produced slots,
+   * in order, never more than the span asked for. Handling a gap when one appears is proven by the
+   * unit suite, which can produce one on demand.
+   */
+  it('asks the node which slots produced a block, rather than assuming every slot did', async () => {
+    const node = new HttpSolanaNode({ endpoint: DEVNET_ENDPOINT, timeoutMilliseconds: 30_000 });
+    const span = 250;
+    const from = Number(finalizedSlot) - span;
+    const produced = await node.readProducedSlots(from, Number(finalizedSlot));
+
+    expect(produced.length).toBeGreaterThan(0);
+    expect(produced.length).toBeLessThanOrEqual(span + 1);
+    const ordered = [...produced].toSorted((left, right) => left - right);
+    expect(ordered).toEqual([...produced]);
+    for (const slot of produced) {
+      expect(slot).toBeGreaterThanOrEqual(from);
+      expect(slot).toBeLessThanOrEqual(Number(finalizedSlot));
+    }
   });
 
   /**

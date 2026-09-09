@@ -663,6 +663,46 @@ describe('a payment made in the chain own currency', () => {
     expect(row.credited_amount).toBe('0');
   });
 
+  /**
+   * A reverted transaction still occupies a block and still carries a value and a recipient, so a
+   * scanner that trusted the block body alone would credit money that never moved. The receipt is
+   * what distinguishes them, and before this test existed the receipt check could have been deleted
+   * without a single assertion failing.
+   *
+   * The destination is the token contract, which has no payable fallback, so value sent to it
+   * reverts on a real chain rather than being simulated.
+   */
+  it('does not credit a value transfer whose transaction reverted', async () => {
+    const paymentId = await insertNativePayment(tokenAddress.toLowerCase(), 1_000_000_000_000_000n);
+    const evaluator = evaluatorFor(gateway, 'worker-native');
+
+    const wallet = createWalletClient({ account: customer, transport: http(rpcUrl) });
+    // Anvil may refuse it at estimation or mine it as a failure. Either outcome must leave the
+    // payment uncredited, and the assertion below covers both without branching on which happened.
+    let reverted: `0x${string}` | null;
+    try {
+      reverted = await wallet.sendTransaction({
+        to: tokenAddress as Address,
+        value: 1_000_000_000_000_000n,
+        account: customer,
+        chain: null,
+        gas: 200_000n,
+      });
+    } catch {
+      reverted = null;
+    }
+    await mineBlock(rpcUrl);
+
+    const receipt =
+      reverted === null ? null : await publicClient().getTransactionReceipt({ hash: reverted });
+    expect(receipt?.status ?? 'rejected before it was mined').not.toBe('success');
+
+    await tick(evaluator);
+    const row = await readPaymentRow(paymentId);
+    expect(row.status).toBe('pending');
+    expect(row.credited_amount).toBe('0');
+  });
+
   it('sums two native transfers to the same destination', async () => {
     const account = anvilAccount(56).address.toLowerCase();
     const paymentId = await insertNativePayment(account, 2_000_000_000_000_000_000n);

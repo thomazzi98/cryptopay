@@ -167,9 +167,14 @@ describe('what a builder refuses rather than fakes', () => {
     ).toThrow(/no field for a memo/);
   });
 
-  it.each([['', 'not-a-number', '-1', '1.5']])('refuses the amount %s', (amountInBaseUnits) => {
-    expect(() => buildPaymentUri(request({ amountInBaseUnits }))).toThrow(
-      /must be a base-unit integer/,
-    );
-  });
+  // Four rows, not one row of four columns: written the other way, only the empty string ran and
+  // the three interesting cases were never executed.
+  it.each([[''], ['not-a-number'], ['-1'], ['1.5'], ['1e18'], [' 25000000']])(
+    'refuses the amount %s',
+    (amountInBaseUnits) => {
+      expect(() => buildPaymentUri(request({ amountInBaseUnits }))).toThrow(
+        /must be a base-unit integer/,
+      );
+    },
+  );
 });

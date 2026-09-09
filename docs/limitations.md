@@ -63,17 +63,25 @@ Between the moment a customer's transfer is credited and the moment it is swept,
 a key this system holds. That window is minutes, not days, but it is real, and during it the
 exposures in sections 1 and 2 apply to actual money.
 
-## 5. USDC only, matched by contract address
+## 5. A short currency list, matched by contract address
 
 Token identity is the contract address from a frozen allowlist, never the symbol. Bridged USDC.e
 returns the byte-identical `symbol()` string `"USDC"`, so a symbol comparison anywhere in the credit
 path would credit the wrong asset; a test asserts a USDC.e transfer to a watched address is not
 credited.
 
-The cost of that strictness is scope. Fee-on-transfer tokens, rebasing tokens and tokens with
-decimals other than six are unsupported and would be credited incorrectly if forced through. Native
-POL payments are out of scope entirely: a native transfer emits no `Transfer` log, so the scanner
-cannot see it at all.
+The cost of that strictness is scope. Fee-on-transfer tokens and rebasing tokens are unsupported and
+would be credited incorrectly if forced through. The registry carries USDC and USDT on Polygon, USDT
+on TRON, USDC on Solana, and each chain's own currency; anything else is refused at the edge of the
+API rather than credited wrongly.
+
+Native currency is supported on all three families and is a different detection problem rather than
+a different asset. A plain value transfer emits no log, so it is found by reading block bodies on
+Polygon, `TransferContract` entries on TRON and lamport deltas on Solana. On Polygon that has one
+honest hole: a native transfer made **by a contract** appears in no block body and is not detected,
+because the trace APIs that would show it are not served by the public endpoints this runs against.
+Reconciliation compares the destination balance against the credited total, which is what notices
+one.
 
 ## 6. Sweep throughput is serialized
 
@@ -106,6 +114,12 @@ mainnets, and refuses a key with any balance or nonce. It cannot help anyone who
   with an API key because that is what a merchant's server does. There is no user table.
 - **Mainnet validation.** No automated test touches mainnet, deliberately. Mainnet is validated once,
   manually, by a human following a runbook.
+- **A TRON or Solana payment cannot be created yet.** This is the largest gap in the multi-chain
+  work and it is not visible from the feature list. The address allocator derives EVM addresses
+  only, so no base58 receiving address can be issued, and the database would refuse one anyway. Both
+  adapters are complete, tested read oracles that nothing in the product can currently point at a
+  live payment: a request for either family is refused with `NETWORK_UNAVAILABLE`. What is missing
+  is per-family key derivation, not adapter work.
 - **Sending on TRON or Solana.** Both chains are watched and neither is signed on. There is no TRON
   or Solana signing code anywhere in this repository, which is why both declare
   `supportsSettlement: false` and why a custodial destination cannot be offered on either: money
@@ -137,9 +151,13 @@ What "a live read" means precisely: the adapter is pointed at the public Nile or
 asked to decode history that already exists there. For TRON that check is strong, because the
 adapter's answer is compared against TronGrid's own account-indexed API for the same transfer, so a
 decoding error shows up as a disagreement with an independent source rather than as a passing test.
-For Solana the live check establishes that slots really are skipped, that the header chain links by
-identifier rather than by arithmetic, and that the block request accepts every transaction version a
-node will serve.
+For Solana the live check establishes that the header chain links by identifier rather than by
+arithmetic, that the adapter asks which slots produced a block rather than assuming every slot did,
+and that the block request accepts every transaction version a node will serve. It does **not**
+establish that slots are currently being skipped: skipping is intermittent, and a 250-slot devnet
+window was observed in which all 251 slots produced a block. Handling a gap when one appears is
+proven by the unit suite, which can produce one on demand; asserting it against the live network
+would be asserting the network's mood.
 
 What no test on this repository establishes is that a payment sent to a TRON or Solana destination
 by a real wallet is detected end to end. That needs a funded testnet account, and neither faucet is

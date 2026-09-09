@@ -256,7 +256,8 @@ Before real money:
    design and the process refuses to start otherwise.
 6. **Alert on `/readyz`.** The failure that is otherwise invisible is a stalled cursor: payments keep
    being created, customers keep paying, nothing is detected, and everything else stays green.
-7. **TLS in front of the API, and rate limiting.** There is none in the application today.
+7. **TLS in front of the API.** Request budgeting per API key is in the application and counted in
+   the database so it holds across replicas, but TLS termination is not this process's job.
 
 ## Integrating this into a payment gateway
 
