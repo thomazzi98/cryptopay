@@ -104,9 +104,12 @@ mainnets, and refuses a key with any balance or nonce. It cannot help anyone who
   are detected, recorded and surfaced; resolving them is manual.
 - **Multiple merchants per key, teams, roles, or an accounts system.** The dashboard authenticates
   with an API key because that is what a merchant's server does. There is no user table.
-- **Rate limiting.** The API has none. A deployment would sit behind something that does.
 - **Mainnet validation.** No automated test touches mainnet, deliberately. Mainnet is validated once,
   manually, by a human following a runbook.
+- **Sending on TRON or Solana.** Both chains are watched and neither is signed on. There is no TRON
+  or Solana signing code anywhere in this repository, which is why both declare
+  `supportsSettlement: false` and why a custodial destination cannot be offered on either: money
+  arriving at an address this system cannot spend from would be stranded.
 
 ## 9. What the tests do and do not prove
 
@@ -118,7 +121,33 @@ They are evidence about **this** code under **these** conditions. They say nothi
 under sustained production load, against a rate-limited provider, during a multi-hour network
 partition, or with a database that has been running for a year. Nothing here has run for a year.
 
-## 10. Known open findings
+## 10. What multi-chain support was and was not validated on
+
+The three families are not equally proven, and the difference matters more than the feature list.
+
+|                                             | Polygon                     | TRON                             | Solana                           |
+| ------------------------------------------- | --------------------------- | -------------------------------- | -------------------------------- |
+| Token detection                             | local chain, full lifecycle | recorded shapes plus a live read | recorded shapes plus a live read |
+| Native detection                            | local chain, full lifecycle | recorded shapes                  | recorded shapes                  |
+| Payment URI and QR                          | decoded from the image      | decoded from the image           | decoded from the image           |
+| A payment actually sent and detected        | yes, on a local chain       | **no**                           | **no**                           |
+| A real transaction broadcast by this system | once, on mainnet            | never                            | never                            |
+
+What "a live read" means precisely: the adapter is pointed at the public Nile or Devnet network and
+asked to decode history that already exists there. For TRON that check is strong, because the
+adapter's answer is compared against TronGrid's own account-indexed API for the same transfer, so a
+decoding error shows up as a disagreement with an independent source rather than as a passing test.
+For Solana the live check establishes that slots really are skipped, that the header chain links by
+identifier rather than by arithmetic, and that the block request accepts every transaction version a
+node will serve.
+
+What no test on this repository establishes is that a payment sent to a TRON or Solana destination
+by a real wallet is detected end to end. That needs a funded testnet account, and neither faucet is
+reachable programmatically from the machine this was built on: Solana's devnet airdrop endpoint
+refuses, and TRON's Nile faucet is a web form. The read path and the send path are different halves,
+and only one of them has been walked on those two chains.
+
+## 11. Known open findings
 
 A structured security review of this repository produced findings that were then adversarially
 verified; sixty survived. Every finding rated critical is fixed. The ones below are rated high, are

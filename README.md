@@ -1,7 +1,19 @@
 # CryptoPay
 
-Stablecoin payment infrastructure for **Polygon PoS**, built so that the backend decides what
-happened by reading the chain and nothing else.
+Multi-chain crypto payment infrastructure for merchants and payment gateways, built so that the
+backend decides what happened by reading the chain and nothing else.
+
+Three chain families are supported: **Polygon** (POL, USDC, USDT), **TRON** (TRX, USDT) and
+**Solana** (SOL, USDC). A caller names a family and a logical currency; which network that resolves
+to follows from the environment of their API key, so a test key has no way to name a main network.
+Each chain is read through its own adapter, because the three genuinely differ - TRON writes
+addresses in case-sensitive base58 and publishes a solidified head, Solana skips slots and states a
+commitment instead of counting confirmations - and pretending otherwise produces a system that halts
+on a healthy chain.
+
+The three are not equally proven, and
+[docs/limitations.md](docs/limitations.md#10-what-multi-chain-support-was-and-was-not-validated-on)
+sets out exactly which parts were validated against what.
 
 A merchant creates a payment through the API and gets a hosted checkout link. The customer pays with
 their wallet. From that point the browser is irrelevant: a worker scans the chain, matches the
@@ -17,7 +29,8 @@ the status and the version are all untouched.
 
 > **Read [docs/limitations.md](docs/limitations.md) before putting money through this.** Key
 > encryption keys are environment variables on the host, there is a real custody window between
-> crediting and sweeping, and the seed has no backup path. None of that is hedged there.
+> crediting and sweeping, the seed has no backup path, and no payment has ever been sent to a TRON
+> or Solana destination and detected end to end. None of that is hedged there.
 
 ## Try it
 
