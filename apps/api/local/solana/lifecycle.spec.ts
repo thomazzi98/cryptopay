@@ -26,8 +26,7 @@ import { ObservedBlockRepository } from '../../src/infrastructure/persistence/ob
 import { PaymentRepository } from '../../src/infrastructure/persistence/payment.repository.js';
 import { PaymentTransferRepository } from '../../src/infrastructure/persistence/payment-transfer.repository.js';
 import { WalletSeedRepository } from '../../src/infrastructure/persistence/wallet-seed.repository.js';
-import { renderPaymentQrCode } from '../../src/infrastructure/qr/qr-code.js';
-import { decodeQrCode } from '../../src/infrastructure/qr/qr-decoder.test-helper.js';
+import { scanPaymentQrCode } from '../../src/infrastructure/qr/qr-decoder.test-helper.js';
 import { UlidFactory } from '../../src/infrastructure/system/ulid.js';
 import { createLocalKeyWrapper } from '../../src/infrastructure/wallet/key-wrapping.js';
 import { generateMasterSeed, sealSeed } from '../../src/infrastructure/wallet/master-seed.js';
@@ -163,7 +162,11 @@ async function customerView(paymentId: string): Promise<CustomerView> {
   return {
     checkout,
     paymentUri,
-    scannedBack: decodeQrCode(renderPaymentQrCode(paymentUri).bytes),
+    // Scanned through the helper that tries several module sizes rather than one. The decoder
+    // occasionally mis-samples a valid symbol at a single scale, and every payment here carries a
+    // randomly derived destination, so a single-scale assertion fails for one run in a handful for a
+    // reason that has nothing to do with this system.
+    scannedBack: scanPaymentQrCode(paymentUri),
   };
 }
 

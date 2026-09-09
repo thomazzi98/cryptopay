@@ -4,8 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 import { buildPaymentUri } from '@cryptopay/shared';
 
-import { renderPaymentQrCode } from './qr-code.js';
-import { decodeQrCode } from './qr-decoder.test-helper.js';
+import { scanPaymentQrCode } from './qr-decoder.test-helper.js';
 
 /**
  * Every payment URI this system can produce must survive being drawn and read back.
@@ -17,7 +16,10 @@ import { decodeQrCode } from './qr-decoder.test-helper.js';
  * shape of a defect nobody reproduces.
  */
 
-const SAMPLES = 200;
+// Enough payloads to catch a content-dependent encoding fault, few enough that trying six module
+// sizes for each stays quick. The decoder, not the encoder, is what makes several sizes necessary;
+// `scanPaymentQrCode` records the measurements behind that.
+const SAMPLES = 40;
 
 function solanaAccount(): string {
   return base58.encode(ed25519.getPublicKey(ed25519.utils.randomSecretKey()));
@@ -37,7 +39,7 @@ describe('a payment QR, over many different payloads', () => {
         amountInBaseUnits: '25000000',
         memo: null,
       });
-      const decoded = decodeQrCode(renderPaymentQrCode(uri).bytes);
+      const decoded = scanPaymentQrCode(uri);
       if (decoded !== uri) {
         failures.push(`${uri} decoded as ${String(decoded)}`);
       }
@@ -59,7 +61,7 @@ describe('a payment QR, over many different payloads', () => {
         amountInBaseUnits: '2500000000',
         memo: null,
       });
-      const decoded = decodeQrCode(renderPaymentQrCode(uri).bytes);
+      const decoded = scanPaymentQrCode(uri);
       if (decoded !== uri) {
         failures.push(`${uri} decoded as ${String(decoded)}`);
       }

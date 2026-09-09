@@ -285,6 +285,18 @@ _Presentation and contract:_
   added together, and `formatAmount` truncates a sub-cent amount of an eighteen-decimal asset to
   zero.
 
+_One intermittent failure, since explained and fixed:_
+
+- The Solana local suite failed occasionally on the assertion that a rendered QR reads back as the
+  URI it was drawn from. It was not the encoder. Over eight hundred random payloads, every one
+  decoded and not one failed at every module size, and the same payload reads at a scale of five and
+  seven while failing at four and six. Scale changes how many pixels a module occupies and never the
+  module pattern, so a symbol that reads at any scale is a correct symbol: the failures are the test
+  decoder mis-sampling a synthetic image. At the product's own scale that is roughly one payload in
+  four hundred, which is invisible on six fixed examples and a coin toss across a loop of two
+  hundred random ones. Every round-trip assertion now scans across several module sizes, which is
+  what a camera moving closer does, and a genuinely broken encoder still fails at all of them.
+
 _Tests that prove less than their names claim:_
 
 - Two resilience sweeps cannot fail: the scanner one never re-runs a scan that writes anything, and
