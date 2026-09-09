@@ -96,7 +96,12 @@ a test runner does not have room for both. Running them together is what produce
 request timeouts that looked like adapter faults and were not.
 
 The TRON suite is slow for a reason that cannot be engineered away: a witness produces a block only
-when there is a transaction to put in it, `broadcasttransaction` does not return until that block
-exists, and TRON policy is nineteen confirmations. A payment reaching completion therefore costs
-about two minutes of real block production. That determinism is worth the wait, because a
-confirmation count is exact rather than a race against a timer.
+when there is a transaction to put in it, and `broadcasttransaction` does not return until that block
+exists. Every confirmation therefore costs a real broadcast and a real block. `tron-local` asks for
+two rather than the nineteen the public network policy demands, which keeps the suite in minutes
+without weakening what it proves: the counting is exact rather than a race against a timer, and the
+nineteen that Nile and mainnet require is a policy number rather than a different mechanism.
+
+Both suites deploy a token. TRON deploys the ERC-20 artifact the Anvil suite shares, and Solana
+creates an SPL mint and an associated token account, so a full token payment lifecycle runs against
+real node software rather than a fixture.

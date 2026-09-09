@@ -148,55 +148,68 @@ partition, or with a database that has been running for a year. Nothing here has
 ## 10. What multi-chain support was and was not validated on
 
 The three families are not equally proven, and the difference matters more than the feature list.
-Three levels of evidence are used below and they are not interchangeable.
+Three levels of evidence are used below and they are not interchangeable. Nothing on this page calls
+a local result a public-network one.
 
 - **Local chain** means a real node of that chain's own software, run in Docker on one machine, with
-  transactions this suite broadcast and signed itself. It proves encoding, signing, block production
-  and detection. It proves nothing about peers, forks, propagation or a public endpoint's manners.
+  transactions this suite built, signed and broadcast itself. It proves transaction encoding,
+  signature verification, contract execution, block production and detection. It proves nothing about
+  peers, forks, propagation, or how a public endpoint behaves under rate limiting.
 - **Live read** means the adapter pointed at the real public network, decoding history that already
   exists there. It proves the shapes that network really returns today.
 - **Mainnet** means real money.
 
-|                                               | Polygon                     | TRON                      | Solana                 |
-| --------------------------------------------- | --------------------------- | ------------------------- | ---------------------- |
-| Destination derived and accepted by the chain | local chain                 | local chain               | local chain            |
-| Payment URI and QR                            | decoded from the image      | decoded from the image    | decoded from the image |
-| Native payment sent, detected, completed      | local chain                 | local chain               | local chain            |
-| Token payment sent and detected               | local chain, full lifecycle | local chain, adapter only | not sent               |
-| Reading real network history                  | live read                   | live read, cross-checked  | live read              |
-| A payment sent on the public testnet          | yes, on Amoy                | **no**                    | **no**                 |
-| A transaction broadcast on mainnet            | once                        | never                     | never                  |
+|                                               | Polygon                | TRON                     | Solana                 |
+| --------------------------------------------- | ---------------------- | ------------------------ | ---------------------- |
+| Destination derived and accepted by the chain | local chain            | local chain              | local chain            |
+| Payment URI and QR                            | decoded from the image | decoded from the image   | decoded from the image |
+| Native payment sent, detected, completed      | local chain            | local chain              | local chain            |
+| Token payment sent, detected, completed       | local chain            | local chain              | local chain            |
+| Webhook published on completion               | local chain            | local chain              | local chain            |
+| Reconciliation finding a missed payment       | local chain            | local chain              | local chain            |
+| Reading real network history                  | live read              | live read, cross-checked | live read              |
+| A payment sent on the public testnet          | yes, on Amoy           | **no**                   | **no**                 |
+| A transaction broadcast on mainnet            | once                   | never                    | never                  |
 
 **What the local chains are.** TRON is `tronbox/tre`, a single-witness java-tron whose genesis
-pre-funds a known account. Solana is `anzaxyz/agave` running `agave-test-validator`. Both answer on
-the same HTTP and JSON-RPC surfaces the adapters use in production, and both suites broadcast real
-signed transactions rather than replaying fixtures. A TRON block is produced only when there is a
-transaction to put in it, which is why nineteen confirmations cost a minute of real block production
-that cannot be hurried.
+pre-funds a known account. Solana is `anzaxyz/agave` running `agave-test-validator` with the SPL
+Token and associated-token-account programs loaded at genesis. Both answer on the same HTTP and
+JSON-RPC surfaces the adapters use in production, and both suites broadcast real signed transactions
+rather than replaying fixtures. A TRON block is produced only when there is a transaction to put in
+it and a broadcast does not return until that block exists, which makes confirmation counting exact
+and makes every confirmation cost real time.
 
-**Where the TRON token test stops short.** A TRC-20 contract is deployed on the local node, minted,
-transferred, and read back by the adapter, which is the check that matters most on TRON: event logs
-carry addresses without the `0x41` byte, and reading one as an EVM address produces a plausible
-identity belonging to nobody. What is not driven is the payment lifecycle for that token, because
-the asset allowlist a payment is classified against is frozen per network and correctly refuses a
-contract deployed at runtime. The local-development escape hatch is deliberately restricted to the
-Anvil network so it cannot become a way to add an asset to a real one. That is the safety property
-working rather than a gap in it.
+**What the token lifecycles actually do.** TRON deploys the same ERC-20 artifact the Anvil suite
+uses, mints, and pays a derived destination; the assertions that matter are the recipient, the
+contract and the sender, each recovered from an event log that carries none of them with the `0x41`
+byte that makes them TRON addresses. Solana creates a real SPL mint and pays into a real associated
+token account, derived the way the runtime derives it, which is the case that adapter is designed
+around: an SPL transfer credits a token account rather than a wallet, and one test asserts the
+tokens landed in the derived account while the payment was attributed to the wallet that owns it.
+
+Both also assert the trap the token registry exists to prevent, on a real chain: the right amount, to
+the right address, in the wrong asset does not settle the payment.
 
 **What no test here establishes.** That a payment sent by a real wallet on the public Nile or Devnet
-networks is detected end to end. That needs a funded testnet account, and neither faucet is reachable
-programmatically from the machine this was built on: Solana's devnet airdrop endpoint answers
-`Internal error` and its testnet endpoint `503`, and TRON's Nile faucet is a web form. The read path
-and the send path are different halves; on those two public networks only one of them has been
-walked. A single funded address on each would close it, and the suites are written so that pointing
-them at a public endpoint is a URL change rather than a rewrite.
+networks is detected end to end. That needs a funded account on each, and neither faucet is reachable
+from the machine this was built on: Solana's devnet airdrop endpoint answers `Internal error`, its
+testnet endpoint `503`, and TRON's Nile faucet is a web form that did not respond. One attempt was
+made and recorded rather than retried. The read path and the send path are different halves; on those
+two public networks only one has been walked. A single funded address on each would close it, and the
+suites are written so that pointing them at a public endpoint is a URL change rather than a rewrite.
 
 **A semantic difference worth knowing before reading a Solana transfer row.** `source_account` does
-not mean on Solana what it means on an EVM chain. A Solana transaction may debit several accounts,
-so there is no single sender to record, and the adapter deliberately stores the account that was
+not mean on Solana what it means on an EVM chain. A Solana transaction may debit several accounts, so
+there is no single sender to record, and the adapter deliberately stores the account that was
 credited rather than guessing which debit was the payment. The field is not published through the
 gateway API; it is visible in the dashboard's transfer list, where on a Solana payment it shows the
 deposit address rather than the payer.
+
+**Two local networks exist in the schema.** `tron-local` and `solana-local` sit alongside
+`local-anvil` so that a token deployed at runtime has somewhere to be registered, which is what makes
+the lifecycles above possible without weakening the frozen asset allowlist on any real network.
+Registration refuses any network outside that set by name, and `resolveNetwork` refuses to hand a
+caller one, so neither is reachable through the public API.
 
 ## 11. Known open findings
 

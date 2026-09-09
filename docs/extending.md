@@ -112,12 +112,20 @@ Unchanged by a new chain: the `Payment` aggregate, the transition table, `Money`
 band, the finality policy, every use case, the compare-and-swap SQL, the outbox, the webhook signer
 and the retry schedule. That list held for both families that have been added since it was written.
 
-**Where the claim is still not fully proven.** There are now three adapters, so the port's shape is
-no longer argued from one implementation. What still does not exist is a single contract suite
-parameterised by an adapter factory: `chain-gateway.spec.ts` runs against Anvil, and TRON and Solana
-have their own local-node and live-network suites asserting comparable things in their own words.
-Extracting one shared suite is the work that would turn "three adapters exist" into "three adapters
-satisfy the same contract".
+**How the claim is checked.** `adapter-contract.spec.ts` states one behavioural contract and runs it
+against all three families. It asserts the parts that must be identical because money depends on
+them — a destination its own chain would accept and no other family would, a currency it refuses, an
+asset named by identity rather than by symbol, a URI a wallet can act on, an account that survives
+the round trip to storage — and it asserts the differences as differences rather than skipping them:
+exactly one family has a numeric chain identity, exactly one can carry a memo, and a transaction is
+a hash, an id or a signature depending on who is asked.
+
+A new family fills in a row of that table. Anything it cannot do is gated behind a capability flag
+rather than faked, and a flag that is true where the code cannot honour it fails the suite.
+
+The contract runs without a node. What genuinely needs a chain lives in `apps/api/local`, which
+drives full payment lifecycles against real TRON and Solana nodes, and in `apps/api/live`, which
+reads the public networks.
 
 ## Adding a payment status
 
