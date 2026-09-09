@@ -107,6 +107,7 @@ export class DeliverCallbacksUseCase {
       await this.dependencies.webhookDeliveryRepository.completeAttempt(
         {
           deliveryId: delivery.identifier,
+          claimedBy: this.dependencies.workerIdentity,
           attemptNumber,
           outcome: 'blocked',
           responseStatus: null,
@@ -176,6 +177,7 @@ export class DeliverCallbacksUseCase {
 
     const attempt = {
       deliveryId: delivery.identifier,
+      claimedBy: this.dependencies.workerIdentity,
       attemptNumber,
       outcome,
       responseStatus: response.status,
@@ -235,6 +237,7 @@ export class DeliverCallbacksUseCase {
 
     const attempt = {
       deliveryId: delivery.identifier,
+      claimedBy: this.dependencies.workerIdentity,
       attemptNumber,
       outcome: 'retryable' as const,
       responseStatus: null,

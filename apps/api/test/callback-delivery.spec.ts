@@ -2,7 +2,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { AddressInfo } from 'node:net';
 
 import { verifyWebhook } from '@cryptopay/shared/server';
-import type { Pool } from 'pg';
+import { Pool } from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, inject, it } from 'vitest';
 
 import { DeliverCallbacksUseCase } from '../src/application/deliver-callbacks.use-case.js';
@@ -11,7 +11,7 @@ import { resolveSystemAddresses } from '../src/infrastructure/callbacks/address-
 import { sendCallback } from '../src/infrastructure/callbacks/callback-transport.js';
 import { WebhookDeliveryRepository } from '../src/infrastructure/persistence/webhook-delivery.repository.js';
 import { WebhookSecretRepository } from '../src/infrastructure/persistence/webhook-secret.repository.js';
-import { createIsolatedDatabase } from './setup/postgres.global-setup.js';
+import { connectionUrlFor, createIsolatedDatabase } from './setup/postgres.global-setup.js';
 
 /**
  * Callback delivery against a real HTTP receiver, over a real socket.
@@ -30,6 +30,7 @@ interface ReceivedRequest {
 }
 
 let pool: Pool;
+let databaseUrl = '';
 let dropDatabase: () => Promise<void>;
 let receiver: Server;
 let receiverPort = 0;
@@ -122,6 +123,7 @@ function handleRequest(request: IncomingMessage, response: ServerResponse): void
 
 beforeAll(async () => {
   const isolated = await createIsolatedDatabase(inject('postgresPort'), 'callbacks');
+  databaseUrl = connectionUrlFor(isolated.databaseName, inject('postgresPort'));
   pool = isolated.pool;
   dropDatabase = isolated.drop;
 
@@ -527,5 +529,148 @@ describe('a merchant with no signing secret', () => {
 
     expect(await statusOf(identifier)).toBe('delivered');
     expect(received).toHaveLength(1);
+  });
+});
+
+/**
+ * The claim is what stops a merchant receiving the same callback twice, and it had no test.
+ *
+ * The partial unique index guarantees one in-flight delivery per merchant environment, which is a
+ * different property and does not cover this: two workers claiming the *same* row are both writing
+ * one row, so the index sees nothing wrong. What stops them is the status re-check in the UPDATE,
+ * which PostgreSQL re-evaluates under READ COMMITTED against the row the first worker just wrote.
+ */
+/**
+ * Waits until PostgreSQL reports a backend blocked on a lock in this database.
+ *
+ * Asking the server rather than sleeping is what makes the contention test deterministic: a sleep
+ * long enough to be reliable is a sleep that makes the suite slow, and one short enough to be quick
+ * is one that passes for the wrong reason.
+ */
+async function waitUntilBlockedOnALock(): Promise<void> {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    const blocked = await pool.query<{ total: string }>(
+      `SELECT count(*)::text AS total
+         FROM pg_stat_activity
+        WHERE datname = current_database()
+          AND wait_event_type = 'Lock'
+          AND state = 'active'`,
+    );
+    if (Number(blocked.rows[0]?.total ?? '0') > 0) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error('No backend ever blocked on a lock, so the contention was never reproduced');
+}
+
+describe('two workers reaching for the same delivery', () => {
+  it('leaves the second worker with nothing rather than a duplicate', async () => {
+    await enqueue('https://merchant.example.com/hooks');
+    const repository = new WebhookDeliveryRepository(pool);
+
+    const first = await repository.claimDue('worker-a', 5, 30);
+    const second = await repository.claimDue('worker-b', 5, 30);
+
+    expect(first).toHaveLength(1);
+    expect(second).toHaveLength(0);
+  });
+
+  /**
+   * The real race, made deterministic rather than hoped for.
+   *
+   * Two claims issued with `Promise.all` do not reproduce it, and neither does simply starting one
+   * before committing the other: a single process serialises them enough that the second statement
+   * often begins after the commit and never contends at all. What contends in production is two
+   * processes holding two connections, so this uses a second pool of exactly one connection, waits
+   * until PostgreSQL itself reports that connection blocked on a lock, and only then commits.
+   *
+   * When the first worker commits, the second's UPDATE re-evaluates its predicate against the row it
+   * just wrote. Without the status re-check, it claims a delivery that is already in flight and the
+   * merchant receives the callback twice.
+   */
+  it('does not claim a delivery another worker committed while it waited', async () => {
+    const identifier = await enqueue('https://merchant.example.com/hooks');
+    const holder = await pool.connect();
+    // One connection, so the contending statement is the only one this pool can be waiting on.
+    const contender = new Pool({ connectionString: databaseUrl, max: 1 });
+
+    try {
+      await holder.query('BEGIN');
+      await holder.query(
+        `UPDATE webhook_deliveries
+            SET status = 'in_flight', claimed_by = 'worker-a',
+                claim_expires_at = now() + interval '30 seconds'
+          WHERE id = $1`,
+        [identifier],
+      );
+
+      const contending = new WebhookDeliveryRepository(contender).claimDue('worker-b', 5, 30);
+      await waitUntilBlockedOnALock();
+      await holder.query('COMMIT');
+
+      expect(await contending).toHaveLength(0);
+    } finally {
+      holder.release();
+      await contender.end();
+    }
+
+    const claimant = await pool.query<{ claimed_by: string }>(
+      'SELECT claimed_by FROM webhook_deliveries WHERE id = $1',
+      [identifier],
+    );
+    expect(claimant.rows[0]?.claimed_by).toBe('worker-a');
+  });
+
+  /**
+   * A worker whose lease expired has had its delivery taken over. Writing its result anyway would
+   * reset what the new holder recorded, turning a delivered event back into a scheduled retry.
+   */
+  it('refuses a result from a worker that no longer holds the claim', async () => {
+    const identifier = await enqueue('https://merchant.example.com/hooks');
+    const repository = new WebhookDeliveryRepository(pool);
+    await repository.claimDue('worker-a', 5, 30);
+
+    await repository.completeAttempt(
+      {
+        deliveryId: identifier,
+        claimedBy: 'worker-b',
+        attemptNumber: 1,
+        outcome: 'delivered',
+        responseStatus: 200,
+        resolvedAddress: '203.0.113.10',
+        responseSnippet: null,
+        durationMilliseconds: 5,
+        failureReason: null,
+        usedPrivateAllowlist: false,
+      },
+      { kind: 'delivered', at: new Date() },
+    );
+
+    expect(await statusOf(identifier)).toBe('in_flight');
+  });
+
+  it('accepts a result from the worker that does hold it', async () => {
+    const identifier = await enqueue('https://merchant.example.com/hooks');
+    const repository = new WebhookDeliveryRepository(pool);
+    await repository.claimDue('worker-a', 5, 30);
+
+    await repository.completeAttempt(
+      {
+        deliveryId: identifier,
+        claimedBy: 'worker-a',
+        attemptNumber: 1,
+        outcome: 'delivered',
+        responseStatus: 200,
+        resolvedAddress: '203.0.113.10',
+        responseSnippet: null,
+        durationMilliseconds: 5,
+        failureReason: null,
+        usedPrivateAllowlist: false,
+      },
+      { kind: 'delivered', at: new Date() },
+    );
+
+    expect(await statusOf(identifier)).toBe('delivered');
   });
 });

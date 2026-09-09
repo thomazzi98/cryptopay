@@ -86,6 +86,11 @@ const DELIVERY_COLUMNS = `id, merchant_id, payment_id, environment, event_type, 
 
 export interface RecordedAttempt {
   readonly deliveryId: string;
+  /**
+   * Who is writing this result. A worker whose lease expired while it was in flight has had its
+   * delivery taken over by somebody else, and must not overwrite what the new holder recorded.
+   */
+  readonly claimedBy: string;
   readonly attemptNumber: number;
   readonly outcome: AttemptOutcome;
   readonly responseStatus: number | null;
@@ -96,7 +101,13 @@ export interface RecordedAttempt {
   readonly usedPrivateAllowlist: boolean;
 }
 
-export interface DeliveryAttempt extends RecordedAttempt {
+/**
+ * An attempt as it is read back, which is not the same shape as one being written. The claim is a
+ * write-time authorisation and is deliberately absent here: nothing reading history needs to know
+ * which worker held the lease, and publishing it would put an internal identity on a merchant's
+ * screen.
+ */
+export interface DeliveryAttempt extends Omit<RecordedAttempt, 'claimedBy'> {
   readonly requestedAt: Date;
 }
 
@@ -177,6 +188,13 @@ export class WebhookDeliveryRepository {
               claim_expires_at = now() + make_interval(secs => $3),
               updated_at = now()
         WHERE id IN (SELECT id FROM due ORDER BY next_attempt_at, id LIMIT $2)
+          -- Re-checked here, not only in the subquery. Two workers selecting concurrently see the
+          -- same candidate rows; the second blocks on the row lock, and under READ COMMITTED
+          -- PostgreSQL re-evaluates this predicate against the row the first one just wrote. Without
+          -- it both workers claim the same delivery and the merchant receives the callback twice.
+          -- The partial unique index does not catch this: both are writing the same row, so there is
+          -- still only one in-flight delivery for that merchant environment.
+          AND status IN ('pending', 'failed')
       RETURNING ${DELIVERY_COLUMNS}`,
       [workerIdentity, limit, leaseSeconds],
     );
@@ -231,7 +249,11 @@ export class WebhookDeliveryRepository {
                 claimed_by = NULL,
                 claim_expires_at = NULL,
                 updated_at = now()
-          WHERE id = $1`,
+          WHERE id = $1
+            -- Only the worker that still holds the claim may settle it. A slow worker whose lease
+            -- expired mid-flight would otherwise clobber the state written by the one that took over,
+            -- resetting a delivered row to a retry or a retry to delivered.
+            AND claimed_by = $7`,
         [
           attempt.deliveryId,
           settled.status,
@@ -239,6 +261,7 @@ export class WebhookDeliveryRepository {
           settled.nextAttemptAt,
           settled.deliveredAt,
           settled.lastFailure,
+          attempt.claimedBy,
         ],
       );
 
