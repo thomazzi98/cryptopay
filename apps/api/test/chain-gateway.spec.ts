@@ -1,9 +1,10 @@
 import { readFile } from 'node:fs/promises';
-import { createServer } from 'node:http';
+import { createServer, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { NATIVE_ASSET_REFERENCE } from '@cryptopay/shared';
 import {
   createPublicClient,
   createWalletClient,
@@ -125,6 +126,73 @@ async function endpointAnswering(
       }
       response.writeHead(200, { 'content-type': 'application/json' });
       response.end(JSON.stringify({ jsonrpc: '2.0', id: call.id, ...decided }));
+    });
+  });
+  await new Promise<void>((ready) => {
+    server.listen(0, '127.0.0.1', ready);
+  });
+  const { port } = server.address() as AddressInfo;
+  return {
+    url: `http://127.0.0.1:${port.toString()}`,
+    close: () =>
+      new Promise<void>((closed) => {
+        server.close(() => {
+          closed();
+        });
+      }),
+  };
+}
+
+async function payNative(from: typeof payer, to: string, amount: bigint): Promise<bigint> {
+  const wallet = createWalletClient({ account: from, transport: http(rpcUrl) });
+  await wallet.sendTransaction({ account: from, chain: null, to: to as Address, value: amount });
+  await mineBlock(rpcUrl);
+  const tip = await createPublicClient({ transport: http(rpcUrl) }).getBlock({
+    blockTag: 'latest',
+  });
+  return tip.number;
+}
+
+async function forwardToChain(raw: string, response: ServerResponse): Promise<void> {
+  const answered = await fetch(rpcUrl, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: raw,
+  });
+  response.writeHead(answered.status, { 'content-type': 'application/json' });
+  response.end(await answered.text());
+}
+
+/**
+ * The real chain, reached through an endpoint that will not serve one particular height. This is
+ * what a pruned archive node or a struggling replica looks like from the adapter's side, and it is
+ * the case a stub cannot produce because everything else in the scan has to keep working.
+ */
+async function endpointRefusingBlock(
+  refused: bigint,
+): Promise<{ readonly url: string; readonly close: () => Promise<void> }> {
+  const server = createServer((request, response) => {
+    const chunks: Buffer[] = [];
+    request.on('data', (chunk: Buffer) => {
+      chunks.push(chunk);
+    });
+    request.on('end', () => {
+      const raw = Buffer.concat(chunks).toString('utf8');
+      const call = JSON.parse(raw) as { id: number; method: string; params?: unknown[] };
+      const asksForRefused =
+        call.method === 'eth_getBlockByNumber' && call.params?.[0] === `0x${refused.toString(16)}`;
+      if (asksForRefused) {
+        response.writeHead(200, { 'content-type': 'application/json' });
+        response.end(
+          JSON.stringify({
+            jsonrpc: '2.0',
+            id: call.id,
+            error: { code: -32_000, message: 'this node does not hold that block' },
+          }),
+        );
+        return;
+      }
+      void forwardToChain(raw, response);
     });
   });
   await new Promise<void>((ready) => {
@@ -542,5 +610,75 @@ describe('what an endpoint refuses with', () => {
 
     expect(failure).toBeInstanceOf(Error);
     expect(failure).not.toBeInstanceOf(LedgerRangeTooWideError);
+  });
+});
+
+/**
+ * A plain value transfer emits no log, so there is nothing to filter on and the block bodies have to
+ * be read one height at a time. That makes the failure mode different from every other scan here: a
+ * height the endpoint will not serve is a hole in the middle of a window, not a refusal of the whole
+ * query.
+ */
+describe('a native transfer, which the chain announces with no log at all', () => {
+  const RECIPIENT = anvilAccount(7).address.toLowerCase();
+
+  function nativeScan(
+    fromHeight: bigint,
+    toHeight = fromHeight,
+  ): Parameters<ChainGateway['scanIncomingTransfers']>[0] {
+    return {
+      fromHeight,
+      toHeight,
+      watchedAccounts: [RECIPIENT],
+      assetReferences: [NATIVE_ASSET_REFERENCE],
+      // One, so the headers cover only the last height of the window. That keeps the header read
+      // and the block-body read on different heights, which is what lets the test below isolate the
+      // body read rather than passing because the header read failed too.
+      headerDepth: 1,
+    };
+  }
+
+  it('is found by reading the block body', async () => {
+    const height = await payNative(customer, RECIPIENT, 7_000_000_000_000_000n);
+    const result = await gateway.scanIncomingTransfers(nativeScan(height));
+
+    expect(result.transfers).toHaveLength(1);
+    expect(result.transfers[0]).toMatchObject({
+      destinationAccount: RECIPIENT,
+      sourceAccount: customer.address.toLowerCase(),
+      assetReference: NATIVE_ASSET_REFERENCE,
+      amountInBaseUnits: 7_000_000_000_000_000n,
+    });
+  });
+
+  /**
+   * The scan must fail rather than succeed with a hole in it. A refused height used to be caught,
+   * turned into null and skipped: the scan returned successfully, the caller advanced the cursor
+   * past the whole window, and the payment in that block was never seen again. Every height in an
+   * EVM range exists, so a refusal is an endpoint problem rather than a property of the chain.
+   */
+  it('fails the scan rather than skipping a block the endpoint will not serve', async () => {
+    const paidAt = await payNative(customer, RECIPIENT, 3_000_000_000_000_000n);
+    await mineBlock(rpcUrl);
+    await mineBlock(rpcUrl);
+    const window = nativeScan(paidAt, paidAt + 2n);
+
+    // The control: through an endpoint that answers, this exact window carries the transfer, and
+    // the refused height below is not the one the headers are read from.
+    const served = await gateway.scanIncomingTransfers(window);
+    expect(served.transfers).toHaveLength(1);
+
+    const endpoint = await endpointRefusingBlock(paidAt);
+    let outcome: unknown;
+
+    try {
+      outcome = await gatewayAt(endpoint.url).scanIncomingTransfers(window);
+    } catch (error) {
+      outcome = error;
+    } finally {
+      await endpoint.close();
+    }
+
+    expect(outcome).toBeInstanceOf(Error);
   });
 });
