@@ -18,7 +18,6 @@ import {
   parseAbiItem,
   BaseError,
   HttpRequestError,
-  RpcRequestError,
   TimeoutError,
   TransactionReceiptNotFoundError,
   type Hex,
@@ -75,10 +74,16 @@ function toLedgerPosition(blockNumber: bigint, blockHash: string): LedgerPositio
 /**
  * Whether the endpoint failed to answer at all, as opposed to answering with a refusal.
  *
- * The distinction decides whether to shrink the window or to back off, and answering it wrongly is
- * expensive in the direction that matters: treating a rate limit as a range refusal answers a
- * struggling provider with a burst of ever-smaller queries, and then leaves the range crawling back
- * up over dozens of clean ticks.
+ * The distinction decides whether to shrink the window or to back off, and it is expensive in both
+ * directions: treating a rate limit as a range refusal answers a struggling provider with a burst of
+ * ever-smaller queries, while treating a range refusal as an outage means the window never narrows
+ * and the network never gets past the first block range the provider will not serve.
+ *
+ * A JSON-RPC error body is the endpoint answering, so it is not a transport failure. Walking for
+ * `RpcRequestError` here made the whole adaptive window inert: viem carries that error in the cause
+ * chain of every JSON-RPC error response, including the ones providers use to report a range cap, so
+ * every refusal was classified as an outage. HTTP-level failures, rate limits answered with a 429
+ * among them, arrive as `HttpRequestError` and are unaffected by its removal.
  *
  * This reads the error's type, never its text.
  */
@@ -88,10 +93,7 @@ function isTransportFailure(error: unknown): boolean {
   }
   return (
     error.walk(
-      (candidate) =>
-        candidate instanceof HttpRequestError ||
-        candidate instanceof TimeoutError ||
-        candidate instanceof RpcRequestError,
+      (candidate) => candidate instanceof HttpRequestError || candidate instanceof TimeoutError,
     ) !== null
   );
 }

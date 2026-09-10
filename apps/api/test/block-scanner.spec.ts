@@ -6,6 +6,10 @@ import type { Pool } from 'pg';
 import { createPublicClient, createWalletClient, http, type Abi, type Address } from 'viem';
 import { afterAll, beforeAll, beforeEach, describe, expect, inject, it } from 'vitest';
 
+import {
+  LedgerRangeTooWideError,
+  type ChainGateway,
+} from '../src/application/ports/chain-gateway.port.js';
 import { ScanNetworkUseCase } from '../src/application/scan-network.use-case.js';
 import { EvmChainGateway } from '../src/infrastructure/chain/evm-chain-gateway.js';
 import { registerLocalDevelopmentAsset } from '../src/infrastructure/chain/network-configuration.js';
@@ -484,5 +488,83 @@ describe('halting rather than guessing', () => {
     expect(await cursors.resume('local-anvil')).toBe(true);
     const outcome = await scanner.execute(FENCING_TOKEN);
     expect(outcome.kind).not.toBe('halted');
+  });
+});
+
+function refusingWiderThan(
+  source: ChainGateway,
+  accepted: number,
+): { readonly gateway: ChainGateway; readonly refusals: () => number } {
+  let refusals = 0;
+  return {
+    refusals: () => refusals,
+    gateway: {
+      ...source,
+      networkIdentifier: source.networkIdentifier,
+      supportsFinalityTag: source.supportsFinalityTag,
+      assertLedgerIdentity: () => source.assertLedgerIdentity(),
+      readChainProgress: () => source.readChainProgress(),
+      confirmFinalizedHeight: (height) => source.confirmFinalizedHeight(height),
+      readPositionAtHeight: (height) => source.readPositionAtHeight(height),
+      reconcileTransfer: (reference, expected) => source.reconcileTransfer(reference, expected),
+      readAssetBalance: (account, asset) => source.readAssetBalance(account, asset),
+      readNativeBalance: (account) => source.readNativeBalance(account),
+      scanIncomingTransfers: (request) => {
+        const width = Number(request.toHeight - request.fromHeight) + 1;
+        if (width > accepted) {
+          refusals += 1;
+          return Promise.reject(
+            new LedgerRangeTooWideError(`${width.toString()} blocks is more than this one serves`),
+          );
+        }
+        return source.scanIncomingTransfers(request);
+      },
+    },
+  };
+}
+
+async function scanRangeOf(): Promise<number> {
+  const result = await pool.query<{ current_scan_range: number }>(
+    `SELECT current_scan_range FROM block_cursors WHERE network_identifier = 'local-anvil'`,
+  );
+  return result.rows[0]?.current_scan_range ?? 0;
+}
+
+/**
+ * Endpoints cap how many blocks one log query may cover and disagree about the cap, so the scanner
+ * discovers it by halving the window until a query is accepted rather than by reading the refusal.
+ * What this asserts is that the discovery happens inside the tick: a network meeting an endpoint it
+ * has never seen still makes progress now, instead of stalling until someone lowers a setting.
+ */
+describe('a window the endpoint refuses to serve', () => {
+  const ACCEPTED_BLOCKS = 2;
+
+  it('halves the window until it is accepted, credits the transfer, and keeps the narrower range', async () => {
+    const account = anvilAccount(21).address.toLowerCase();
+    const paymentId = await insertPayment(account);
+    await payFrom(customer, tokenAddress, account, 25_000_000n);
+    await mineBlock(rpcUrl);
+    await mineBlock(rpcUrl);
+
+    const refusing = refusingWiderThan(gateway, ACCEPTED_BLOCKS);
+    const narrowing = new ScanNetworkUseCase({
+      gateway: refusing.gateway,
+      paymentRepository: new PaymentRepository(pool),
+      paymentTransferRepository: transfers,
+      blockCursorRepository: cursors,
+      observedBlockRepository: new ObservedBlockRepository(pool),
+      chainScanStore: new ChainScanStore(pool),
+      ulidFactory: new UlidFactory(),
+      now: () => new Date(),
+    });
+
+    const outcome = await narrowing.execute(FENCING_TOKEN);
+
+    // The refusals are the point: without them the first window would have been accepted whole and
+    // this would assert nothing about narrowing.
+    expect(refusing.refusals()).toBeGreaterThan(0);
+    expect(outcome.kind).toBe('scanned');
+    expect(await countTransfers(paymentId)).toBe(1);
+    expect(await scanRangeOf()).toBeLessThanOrEqual(ACCEPTED_BLOCKS);
   });
 });

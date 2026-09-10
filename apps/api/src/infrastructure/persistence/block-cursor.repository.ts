@@ -14,6 +14,8 @@ export interface BlockCursor {
   readonly lastScannedHeight: bigint;
   readonly lastScannedReference: string;
   readonly finalizedHeight: bigint | null;
+  /** When the finalized height last moved. Null until a network reports one for the first time. */
+  readonly finalizedAdvancedAt: Date | null;
   readonly currentScanRange: number;
   readonly consecutiveSuccesses: number;
   readonly haltedAt: Date | null;
@@ -27,6 +29,7 @@ interface CursorRow {
   readonly last_scanned_height: string;
   readonly last_scanned_reference: string;
   readonly finalized_height: string | null;
+  readonly finalized_advanced_at: Date | null;
   readonly current_scan_range: number;
   readonly consecutive_successes: number;
   readonly halted_at: Date | null;
@@ -41,6 +44,7 @@ function toCursor(row: CursorRow): BlockCursor {
     lastScannedHeight: BigInt(row.last_scanned_height),
     lastScannedReference: row.last_scanned_reference,
     finalizedHeight: row.finalized_height === null ? null : BigInt(row.finalized_height),
+    finalizedAdvancedAt: row.finalized_advanced_at,
     currentScanRange: row.current_scan_range,
     consecutiveSuccesses: row.consecutive_successes,
     haltedAt: row.halted_at,
@@ -51,7 +55,8 @@ function toCursor(row: CursorRow): BlockCursor {
 }
 
 const CURSOR_COLUMNS = `network_identifier, last_scanned_height, last_scanned_reference,
-  finalized_height, current_scan_range, consecutive_successes, halted_at, halted_reason,
+  finalized_height, finalized_advanced_at, current_scan_range, consecutive_successes,
+  halted_at, halted_reason,
   fencing_token, updated_at`;
 
 export class BlockCursorRepository {

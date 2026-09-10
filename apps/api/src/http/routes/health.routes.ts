@@ -1,5 +1,6 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
 
+import { finalityHasStalled } from '../../domain/finality-policy.js';
 import type { BlockCursorRepository } from '../../infrastructure/persistence/block-cursor.repository.js';
 import type { ApplicationServer } from '../server-types.js';
 
@@ -48,6 +49,19 @@ function summarizeReadiness(components: readonly ComponentReport[]): ComponentSt
  */
 const STALE_CURSOR_SECONDS = 120;
 
+/**
+ * How long the chain's finality view may stand still before it is worth waking someone.
+ *
+ * This is the failure a confirmation count cannot see: blocks keep arriving, confirmations climb,
+ * and nothing finalizes. The gate holds rather than falling back to a count, which is the right
+ * answer and a silent one — every payment waiting on finality simply stops completing while every
+ * other signal stays green. Reporting it here is what makes the hold visible.
+ *
+ * Fifteen minutes is far longer than any of the supported chains takes to publish a finality
+ * milestone, so a report here means something is actually wrong rather than slow.
+ */
+const STALLED_FINALITY_SECONDS = 900;
+
 async function reportNetworks(
   dependencies: ReadinessDependencies,
 ): Promise<readonly ComponentReport[]> {
@@ -77,6 +91,16 @@ async function reportNetworks(
         name: `network:${cursor.networkIdentifier}`,
         status: 'degraded' as const,
         detail: `the cursor has not advanced for ${secondsSinceUpdate.toString()} seconds`,
+      };
+    }
+    if (finalityHasStalled(cursor.finalizedAdvancedAt, new Date(now), STALLED_FINALITY_SECONDS)) {
+      const stalledSeconds = Math.round(
+        (now - (cursor.finalizedAdvancedAt?.getTime() ?? now)) / 1000,
+      );
+      return {
+        name: `network:${cursor.networkIdentifier}`,
+        status: 'degraded' as const,
+        detail: `the finalized height has not moved for ${stalledSeconds.toString()} seconds, so payments are held rather than completed`,
       };
     }
     return {

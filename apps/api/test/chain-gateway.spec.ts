@@ -17,6 +17,7 @@ import { beforeAll, describe, expect, inject, it } from 'vitest';
 
 import {
   LedgerIdentityMismatchError,
+  LedgerRangeTooWideError,
   type ChainGateway,
 } from '../src/application/ports/chain-gateway.port.js';
 import {
@@ -97,6 +98,60 @@ beforeAll(async () => {
   await mint(payer.address, 1_000_000_000n);
   await mint(customer.address, 1_000_000_000n);
 });
+
+/**
+ * An endpoint that answers one canned thing per method and has no chain behind it, so a single
+ * failure mode can be put in front of the gateway. A number is sent as an HTTP status; anything else
+ * is sent as a JSON-RPC body.
+ */
+async function endpointAnswering(
+  answer: (method: string) => Record<string, unknown> | number,
+): Promise<{ readonly url: string; readonly close: () => Promise<void> }> {
+  const server = createServer((request, response) => {
+    const chunks: Buffer[] = [];
+    request.on('data', (chunk: Buffer) => {
+      chunks.push(chunk);
+    });
+    request.on('end', () => {
+      const call = JSON.parse(Buffer.concat(chunks).toString('utf8')) as {
+        id: number;
+        method: string;
+      };
+      const decided = answer(call.method);
+      if (typeof decided === 'number') {
+        response.writeHead(decided);
+        response.end('unavailable');
+        return;
+      }
+      response.writeHead(200, { 'content-type': 'application/json' });
+      response.end(JSON.stringify({ jsonrpc: '2.0', id: call.id, ...decided }));
+    });
+  });
+  await new Promise<void>((ready) => {
+    server.listen(0, '127.0.0.1', ready);
+  });
+  const { port } = server.address() as AddressInfo;
+  return {
+    url: `http://127.0.0.1:${port.toString()}`,
+    close: () =>
+      new Promise<void>((closed) => {
+        server.close(() => {
+          closed();
+        });
+      }),
+  };
+}
+
+function gatewayAt(url: string): ChainGateway {
+  return new EvmChainGateway({
+    networkIdentifier: 'local-anvil',
+    chainIdentifier: 31_337,
+    rpcUrls: [url],
+    supportsFinalityTag: false,
+  });
+}
+
+const ANVIL_CHAIN_ID = { result: '0x7a69' };
 
 describe('the Transfer event signature', () => {
   /**
@@ -349,51 +404,20 @@ describe('reconciling a recorded transfer', () => {
    * it for a missing receipt would withdraw every credit it was asked about.
    */
   it('reports an endpoint that will not serve the receipt call as indeterminate', async () => {
-    const server = createServer((request, response) => {
-      const chunks: Buffer[] = [];
-      request.on('data', (chunk: Buffer) => {
-        chunks.push(chunk);
-      });
-      request.on('end', () => {
-        const call = JSON.parse(Buffer.concat(chunks).toString('utf8')) as {
-          id: number;
-          method: string;
-        };
-        const answer =
-          call.method === 'eth_chainId'
-            ? { jsonrpc: '2.0', id: call.id, result: '0x7a69' }
-            : {
-                jsonrpc: '2.0',
-                id: call.id,
-                error: { code: -32_601, message: 'the method eth_getTransactionReceipt not found' },
-              };
-        response.writeHead(200, { 'content-type': 'application/json' });
-        response.end(JSON.stringify(answer));
-      });
-    });
-    await new Promise<void>((ready) => {
-      server.listen(0, '127.0.0.1', ready);
-    });
-    const port = (server.address() as AddressInfo).port;
-    const unhelpful = new EvmChainGateway({
-      networkIdentifier: 'local-anvil',
-      chainIdentifier: 31_337,
-      rpcUrls: [`http://127.0.0.1:${port.toString()}`],
-      supportsFinalityTag: false,
-    });
+    const endpoint = await endpointAnswering((method) =>
+      method === 'eth_chainId'
+        ? ANVIL_CHAIN_ID
+        : { error: { code: -32_601, message: 'the method eth_getTransactionReceipt not found' } },
+    );
 
     try {
-      const outcome = await unhelpful.reconcileTransfer(
+      const outcome = await gatewayAt(endpoint.url).reconcileTransfer(
         { transactionReference: `0x${'e'.repeat(64)}`, eventIndex: 0 },
         { height: 1n, reference: `0x${'f'.repeat(64)}` },
       );
       expect(outcome.kind).toBe('indeterminate');
     } finally {
-      await new Promise<void>((closed) => {
-        server.close(() => {
-          closed();
-        });
-      });
+      await endpoint.close();
     }
   });
 
@@ -461,5 +485,62 @@ describe('a header read that fails', () => {
   it('still reads a height the chain does have', async () => {
     const lookup = await gateway.readPositionAtHeight(1n);
     expect(lookup.kind).toBe('present');
+  });
+});
+
+function wideScan(): Parameters<ChainGateway['scanIncomingTransfers']>[0] {
+  return {
+    fromHeight: 1n,
+    toHeight: 5000n,
+    watchedAccounts: [RECEIVING_ACCOUNT],
+    assetReferences: [tokenAddress],
+    headerDepth: 1,
+  };
+}
+
+describe('what an endpoint refuses with', () => {
+  /**
+   * Providers report a range cap in a JSON-RPC error body, not at the HTTP layer. Reading that as an
+   * outage is what makes the adaptive window inert: the caller backs off and asks for the identical
+   * window again next tick instead of halving it, so a network never gets past the first range the
+   * provider will not serve.
+   */
+  it('reads a refusal answered in a json-rpc error body as a range that is too wide', async () => {
+    const endpoint = await endpointAnswering((method) =>
+      method === 'eth_chainId'
+        ? ANVIL_CHAIN_ID
+        : { error: { code: -32_005, message: 'query returned more than 10000 results' } },
+    );
+
+    try {
+      await expect(
+        gatewayAt(endpoint.url).scanIncomingTransfers(wideScan()),
+      ).rejects.toBeInstanceOf(LedgerRangeTooWideError);
+    } finally {
+      await endpoint.close();
+    }
+  });
+
+  /**
+   * The other direction, and the reason this is decided on the error's type rather than on its
+   * presence. An endpoint that did not answer at all is struggling, and a burst of ever-smaller
+   * queries makes it worse, so that failure has to keep reaching the caller as a failure.
+   */
+  it('does not read an endpoint that never answered as a range that is too wide', async () => {
+    const endpoint = await endpointAnswering((method) =>
+      method === 'eth_chainId' ? ANVIL_CHAIN_ID : 503,
+    );
+    let failure: unknown = null;
+
+    try {
+      await gatewayAt(endpoint.url).scanIncomingTransfers(wideScan());
+    } catch (error) {
+      failure = error;
+    } finally {
+      await endpoint.close();
+    }
+
+    expect(failure).toBeInstanceOf(Error);
+    expect(failure).not.toBeInstanceOf(LedgerRangeTooWideError);
   });
 });

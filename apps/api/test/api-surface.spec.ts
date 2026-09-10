@@ -167,7 +167,9 @@ beforeEach(async () => {
     [DELIVERY_ID],
   );
   await pool.query(
-    `UPDATE block_cursors SET halted_at = NULL, halted_reason = NULL, updated_at = now()
+    `UPDATE block_cursors
+        SET halted_at = NULL, halted_reason = NULL, updated_at = now(),
+            finalized_advanced_at = NULL
       WHERE network_identifier = 'polygon-amoy'`,
   );
 });
@@ -228,6 +230,46 @@ describe('readiness against a real database', () => {
     expect(
       body.components.find((entry) => entry.name === 'network:polygon-amoy')?.detail,
     ).toContain('has not advanced');
+  });
+
+  /**
+   * The stall a confirmation count cannot see. Blocks keep arriving and confirmations climb while
+   * nothing finalizes, so the gate holds and every payment waiting on finality quietly stops
+   * completing. Holding is the right answer; being silent about it is not.
+   */
+  it('reports a finality view that has stopped moving', async () => {
+    await pool.query(
+      `UPDATE block_cursors SET finalized_advanced_at = now() - interval '30 minutes'
+        WHERE network_identifier = 'polygon-amoy'`,
+    );
+    const response = await server.inject({ method: 'GET', url: '/readyz' });
+
+    const body = response.json<{
+      status: string;
+      components: { name: string; detail: string }[];
+    }>();
+    expect(body.status).toBe('degraded');
+    expect(
+      body.components.find((entry) => entry.name === 'network:polygon-amoy')?.detail,
+    ).toContain('finalized height has not moved');
+  });
+
+  /** The counterexample: a finality view that moved recently is not reported at all. */
+  it('says nothing about a finality view that is still moving', async () => {
+    await pool.query(
+      `UPDATE block_cursors SET finalized_advanced_at = now() - interval '1 minute'
+        WHERE network_identifier = 'polygon-amoy'`,
+    );
+    const response = await server.inject({ method: 'GET', url: '/readyz' });
+
+    const body = response.json<{
+      status: string;
+      components: { name: string; status: string }[];
+    }>();
+    expect(body.status).toBe('ok');
+    expect(body.components.find((entry) => entry.name === 'network:polygon-amoy')?.status).toBe(
+      'ok',
+    );
   });
 });
 
