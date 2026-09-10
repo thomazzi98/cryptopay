@@ -12,7 +12,7 @@ commitment instead of counting confirmations - and pretending otherwise produces
 on a healthy chain.
 
 The three are not equally proven, and
-[docs/limitations.md](docs/limitations.md#10-what-multi-chain-support-was-and-was-not-validated-on)
+[docs/limitations.md](docs/limitations.md#10-what-each-claim-on-this-page-rests-on)
 sets out exactly which parts were validated against what.
 
 A merchant creates a payment through the API and gets a hosted checkout link. The customer pays with
@@ -29,8 +29,9 @@ the status and the version are all untouched.
 
 > **Read [docs/limitations.md](docs/limitations.md) before putting money through this.** Key
 > encryption keys are environment variables on the host, there is a real custody window between
-> crediting and sweeping, the seed has no backup path, and no payment has ever been sent to a TRON
-> or Solana destination and detected end to end. None of that is hedged there.
+> crediting and sweeping, the seed has no backup path, and no payment has ever been sent on the
+> public TRON or Solana networks and detected end to end - both were proven against a real node of
+> that chain's own software, run locally. None of that is hedged there.
 
 ## Try it
 
