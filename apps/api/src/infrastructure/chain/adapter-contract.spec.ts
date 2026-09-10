@@ -46,8 +46,16 @@ import {
 const WELL_KNOWN_MNEMONIC =
   'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
 
+/**
+ * Derived once. `mnemonicToSeedSync` is PBKDF2 with two thousand iterations, deliberately slow, and
+ * calling it per allocation made a test that derives thirty-two addresses spend all of its time
+ * re-deriving the same seed rather than exercising what it is named for.
+ */
+const MASTER_SEED = Buffer.from(mnemonicToSeedSync(WELL_KNOWN_MNEMONIC));
+
+/** A copy each time, because an allocator is entitled to assume it owns nothing the caller holds. */
 function seed(): Buffer {
-  return Buffer.from(mnemonicToSeedSync(WELL_KNOWN_MNEMONIC));
+  return Buffer.from(MASTER_SEED);
 }
 
 interface AdapterContract {
