@@ -357,12 +357,27 @@ describe('finding a TRC-20 payment', () => {
 });
 
 describe('reconciling a transfer that was already credited', () => {
+  const RECORDED: TronBlock = { header: header(10, 'ten'), transactions: [] };
+
   it('reports a transaction the chain no longer knows as orphaned', async () => {
-    const result = await gatewayOver(stubNode()).reconcileTransfer(
+    const result = await gatewayOver(stubNode({ blocks: [RECORDED] })).reconcileTransfer(
       { transactionReference: 'token-1', eventIndex: 0 },
       { height: 10n, reference: 'block-ten' },
     );
     expect(result.kind).toBe('orphaned');
+  });
+
+  /**
+   * A replica that has not indexed the recorded block answers "unknown transaction" exactly as a
+   * node does for one that genuinely no longer exists. Only the second justifies withdrawing a
+   * credit, so an endpoint that cannot serve that block must not produce one.
+   */
+  it('leaves the row alone when the node cannot serve the block it was recorded in', async () => {
+    const result = await gatewayOver(stubNode()).reconcileTransfer(
+      { transactionReference: 'token-1', eventIndex: 0 },
+      { height: 10n, reference: 'block-ten' },
+    );
+    expect(result.kind).toBe('indeterminate');
   });
 
   it('leaves the row alone when the endpoint cannot answer', async () => {

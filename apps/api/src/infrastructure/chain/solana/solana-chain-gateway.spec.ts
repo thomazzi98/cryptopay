@@ -365,11 +365,25 @@ describe('finding an SPL token payment', () => {
 
 describe('reconciling and reading balances', () => {
   it('reports a signature the chain no longer knows as orphaned', async () => {
-    const result = await gatewayOver(stubNode({ signatureSlot: null })).reconcileTransfer(
+    const node = stubNode({ signatureSlot: null, blocks: [blockAt({ slot: 100 })] });
+    const result = await gatewayOver(node).reconcileTransfer(
       { transactionReference: SIGNATURE, eventIndex: 0 },
       { height: 100n, reference: 'blockhash-100' },
     );
     expect(result.kind).toBe('orphaned');
+  });
+
+  /**
+   * A replica that has not indexed the recorded slot answers "unknown signature" exactly as a node
+   * does for one that genuinely no longer exists. Only the second justifies withdrawing a credit,
+   * so an endpoint that cannot serve that slot must not produce one.
+   */
+  it('leaves the row alone when the node cannot serve the slot it was recorded in', async () => {
+    const result = await gatewayOver(stubNode({ signatureSlot: null })).reconcileTransfer(
+      { transactionReference: SIGNATURE, eventIndex: 0 },
+      { height: 100n, reference: 'blockhash-100' },
+    );
+    expect(result.kind).toBe('indeterminate');
   });
 
   it('leaves the row alone when the endpoint cannot answer', async () => {

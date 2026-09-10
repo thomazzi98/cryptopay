@@ -273,13 +273,20 @@ export class SolanaChainGateway implements ChainGateway {
     try {
       const slot = await this.node.readSlotOfSignature(reference.transactionReference);
       if (slot === null) {
+        // Before withdrawing a credit, confirm this node can still serve the slot the transfer was
+        // recorded in. A validator that is behind, or one whose history does not reach back that
+        // far, answers "unknown" exactly as one does for a signature that genuinely no longer
+        // exists, and only one of those two justifies taking a merchant's money back.
+        const recorded = await this.node.readBlock(Number(expected.height));
+        if (recorded === null) {
+          return { kind: 'indeterminate' };
+        }
         return { kind: 'orphaned' };
       }
       const block = await this.node.readBlock(slot);
       if (block === null) {
         return { kind: 'indeterminate' };
       }
-      void expected;
       return { kind: 'present', position: toPosition(block) };
     } catch {
       return { kind: 'indeterminate' };

@@ -290,6 +290,14 @@ export class TronChainGateway implements ChainGateway {
     try {
       const found = await this.node.readTransaction(reference.transactionReference);
       if (found === null) {
+        // Before withdrawing a credit, confirm this node can still serve the block the transfer was
+        // recorded in. A replica that is behind, or one that has not indexed the transaction yet,
+        // answers "unknown" exactly as a node does for a transaction that genuinely no longer
+        // exists, and only one of those two justifies taking a merchant's money back.
+        const recorded = await this.node.readBlock(Number(expected.height));
+        if (recorded === null) {
+          return { kind: 'indeterminate' };
+        }
         return { kind: 'orphaned' };
       }
       const block = await this.node.readBlock(found.blockHeight);

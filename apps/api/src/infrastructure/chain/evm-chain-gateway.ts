@@ -20,6 +20,7 @@ import {
   HttpRequestError,
   RpcRequestError,
   TimeoutError,
+  TransactionReceiptNotFoundError,
   type Hex,
   type PublicClient,
 } from 'viem';
@@ -417,7 +418,17 @@ export class EvmChainGateway implements ChainGateway {
       // A dropped transaction and an unreachable provider look identical from here. Reporting
       // "indeterminate" leaves the row alone; reporting "orphaned" would withdraw a real credit
       // because an endpoint had a bad minute.
-      if (error instanceof Error && /not (be )?found/i.test(error.message)) {
+      //
+      // Decided on the typed error rather than on the wording of a message. The text this used to
+      // match is written by whichever provider answered, and `method not found` — what an endpoint
+      // says when it does not implement a call at all — matches the same pattern as `transaction not
+      // found`. An unsupported method would therefore have withdrawn every credit it was asked
+      // about.
+      const receiptIsAbsent =
+        error instanceof BaseError
+          ? error.walk((cause) => cause instanceof TransactionReceiptNotFoundError) !== null
+          : false;
+      if (receiptIsAbsent) {
         return { kind: 'orphaned' };
       }
       return { kind: 'indeterminate' };

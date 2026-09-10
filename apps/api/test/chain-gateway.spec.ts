@@ -1,4 +1,6 @@
 import { readFile } from 'node:fs/promises';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -338,6 +340,61 @@ describe('reconciling a recorded transfer', () => {
       { height: 1n, reference: `0x${'d'.repeat(64)}` },
     );
     expect(outcome.kind).toBe('orphaned');
+  });
+
+  /**
+   * The endpoint that answers is not necessarily one that knows. An endpoint which does not
+   * implement `eth_getTransactionReceipt` at all replies that the method does not exist, which
+   * reads like "not found" and is nothing of the kind: it is an infrastructure failure, and taking
+   * it for a missing receipt would withdraw every credit it was asked about.
+   */
+  it('reports an endpoint that will not serve the receipt call as indeterminate', async () => {
+    const server = createServer((request, response) => {
+      const chunks: Buffer[] = [];
+      request.on('data', (chunk: Buffer) => {
+        chunks.push(chunk);
+      });
+      request.on('end', () => {
+        const call = JSON.parse(Buffer.concat(chunks).toString('utf8')) as {
+          id: number;
+          method: string;
+        };
+        const answer =
+          call.method === 'eth_chainId'
+            ? { jsonrpc: '2.0', id: call.id, result: '0x7a69' }
+            : {
+                jsonrpc: '2.0',
+                id: call.id,
+                error: { code: -32_601, message: 'the method eth_getTransactionReceipt not found' },
+              };
+        response.writeHead(200, { 'content-type': 'application/json' });
+        response.end(JSON.stringify(answer));
+      });
+    });
+    await new Promise<void>((ready) => {
+      server.listen(0, '127.0.0.1', ready);
+    });
+    const port = (server.address() as AddressInfo).port;
+    const unhelpful = new EvmChainGateway({
+      networkIdentifier: 'local-anvil',
+      chainIdentifier: 31_337,
+      rpcUrls: [`http://127.0.0.1:${port.toString()}`],
+      supportsFinalityTag: false,
+    });
+
+    try {
+      const outcome = await unhelpful.reconcileTransfer(
+        { transactionReference: `0x${'e'.repeat(64)}`, eventIndex: 0 },
+        { height: 1n, reference: `0x${'f'.repeat(64)}` },
+      );
+      expect(outcome.kind).toBe('indeterminate');
+    } finally {
+      await new Promise<void>((closed) => {
+        server.close(() => {
+          closed();
+        });
+      });
+    }
   });
 
   it('reports an event index the transaction does not contain as orphaned', async () => {

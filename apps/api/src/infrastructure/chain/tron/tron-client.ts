@@ -191,6 +191,36 @@ function decodeEvents(raw: unknown): readonly TronEventLog[] {
   return events;
 }
 
+/** TronGrid reports a failure in the body of an otherwise successful response, under this key. */
+const ERROR_FIELD = 'Error';
+
+/**
+ * Refuses a body that carries TronGrid's own error, however healthy the HTTP status looked.
+ *
+ * Every read here degrades an unrecognised body into a benign negative: no block at this height, no
+ * events in this block, the chain does not know this transaction, the account holds nothing. Each of
+ * those is a legitimate answer the scanner and the reconciler act on. An endpoint that fails while
+ * answering 200 therefore became "there is no payment here", which is the one translation this
+ * system must never make: a window would be scanned as empty and the cursor advanced past it, or a
+ * credited transfer would be withdrawn as orphaned because the node that could confirm it was the
+ * one that failed.
+ *
+ * Throwing instead leaves the cursor where it was and the credit where it was, which is what "cannot
+ * determine, do not guess" means on this path.
+ */
+function assertNoInBodyError(path: string, body: unknown): void {
+  if (typeof body !== 'object' || body === null) {
+    return;
+  }
+  const reported = (body as Record<string, unknown>)[ERROR_FIELD];
+  if (typeof reported !== 'string' || reported.length === 0) {
+    return;
+  }
+  // The endpoint is named and the message is not, because it is attacker-influenced on some paths
+  // and this string reaches a log.
+  throw new TronTransportError(`${path} answered with an error body`);
+}
+
 export class HttpTronNode implements TronNode {
   private readonly baseUrl: string;
   private readonly apiKey: string | null;
@@ -221,7 +251,9 @@ export class HttpTronNode implements TronNode {
     if (!response.ok) {
       throw new TronTransportError(`the endpoint answered ${response.status}`);
     }
-    return response.json();
+    const answered: unknown = await response.json();
+    assertNoInBodyError(path, answered);
+    return answered;
   }
 
   async readHead(): Promise<TronBlockHeader> {
