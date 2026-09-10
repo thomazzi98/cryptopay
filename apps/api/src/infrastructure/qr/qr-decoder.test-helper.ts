@@ -35,28 +35,29 @@ export function decodeQrCode(bytes: Uint8Array): string | null {
 }
 
 /**
- * Renders a payment URI and reads it back, trying larger module sizes before giving up.
+ * Renders a payment URI and reads it back, trying other module sizes before giving up.
  *
- * The retry is measured rather than superstitious. Over eight hundred random payloads, four hundred
- * token and four hundred native, every single one decoded at some scale and not one failed at all of
- * them. The same payload reads at a scale of five and seven while failing at four and six, with a
- * different pattern for each payload, and one native payload in four hundred needed a scale of
- * sixteen. Larger symbols are the more forgiving ones: the token failures vanish above a module size
- * of seven, while the shorter native payload, whose symbol has fewer modules, is the one that
- * occasionally needs the largest.
+ * Scale changes how many pixels a module occupies and never the module pattern, so a symbol that
+ * reads at any size is a correct symbol, and a size at which it does not read is this detector
+ * mis-sampling a synthetic image. Trying several stands in for a camera that can move closer, and it
+ * is what makes the fixed examples reliable rather than a coin toss: at a single size roughly one
+ * payload in a few hundred is not read.
  *
- * Scale changes how many pixels a module occupies and never the module pattern itself, so a symbol
- * that reads at any scale is a correct symbol, and the failures below eight are this detector
- * mis-sampling a synthetic image rather than anything wrong with what was drawn. Asserting a single
- * scale therefore tests the decoder's sampling rather than the product, and does it flakily: at the
- * default scale the failure rate is roughly one payload in four hundred, which across a loop of two
- * hundred is a coin toss per run.
+ * The sizes span both parities on evidence. The list was six even numbers, and a payload turned up
+ * that failed at every one of them while reading correctly at 5, 7, 9, 11, 13 and 15: failures are
+ * scattered, but for a given payload they correlate, so sampling one parity can miss a symbol that
+ * is fine.
  *
- * The product's own scale is tried first so the image a customer receives is the one under test, and
- * the larger sizes stand in for a camera that can move closer. A genuinely broken encoder fails at
- * every scale and is still caught.
+ * What this does not do is guarantee a read. Payloads exist that this decoder will not read at any
+ * size tried, and with only one decoder available here there is no way to tell such a symbol being
+ * malformed from this decoder refusing a symbol that is fine. That limit is why the round-trip
+ * corpus is derived from a fixed seed rather than drawn fresh: a failure has to name an input
+ * somebody can render again and decide about.
+ *
+ * The product's own scale is tried first so the image a customer receives is the one under test. A
+ * genuinely broken encoder fails at every size and is still caught.
  */
-const SCAN_SCALES: readonly number[] = [6, 8, 10, 12, 14, 16];
+const SCAN_SCALES: readonly number[] = [6, 7, 8, 9, 11, 13, 15, 16];
 
 export function scanPaymentQrCode(paymentUri: string): string | null {
   for (const scale of SCAN_SCALES) {
