@@ -277,6 +277,12 @@ that claims otherwise, and nothing already fixed is still listed.
 - `formatAmount` truncates rather than rounds. It no longer writes a non-zero amount as zero, since
   it extends to the first significant digit instead, but 0.999 still reads as 0.99.
 - Retiring a secret has no confirmation step.
+- A QR this system draws is checked against one third-party decoder, and that decoder will not read a
+  small fraction of the symbols the encoder produces, at any image size tried. With only one decoder
+  available there is no way to tell such a symbol being malformed from the decoder refusing one that
+  is fine, so the round-trip corpus is derived from a fixed seed and a failure is investigated rather
+  than retried. No payment depends on the QR: the address, the asset contract and the exact amount in
+  both display and base units are all shown as text beside it, and what is credited is what arrives.
 
 **Security posture:**
 
