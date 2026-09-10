@@ -41,6 +41,7 @@ let tokenAddress: string;
 let decoyTokenAddress: string;
 let tokenAbi: Abi;
 let scanner: ScanNetworkUseCase;
+let gateway: EvmChainGateway;
 let cursors: BlockCursorRepository;
 let transfers: PaymentTransferRepository;
 let paymentCounter = 0;
@@ -189,7 +190,7 @@ beforeAll(async () => {
   await callToken(tokenAddress, 'mint', [customer.address, 10_000_000_000n]);
   await callToken(decoyTokenAddress, 'mint', [payer.address, 10_000_000_000n]);
 
-  const gateway = new EvmChainGateway({
+  gateway = new EvmChainGateway({
     networkIdentifier: 'local-anvil',
     chainIdentifier: 31_337,
     rpcUrls: [rpcUrl],
@@ -384,6 +385,82 @@ describe('fencing a worker that lost its lease', () => {
 
     expect(outcome.kind).toBe('lease_lost');
     expect(await countTransfers(paymentId)).toBe(0);
+  });
+
+  /**
+   * The case the guard above cannot reach, and the only one that matters for a process that is stuck
+   * rather than dead.
+   *
+   * A worker reads the cursor, passes the check that its token is current, and then takes long
+   * enough over the scan that another worker takes the lease. By the time it writes, its token is
+   * stale, and nothing it checked earlier can know that. Only the token predicate on the write
+   * itself refuses it. The test above returns before the scan begins, so it exercises the early
+   * check and never the write path.
+   *
+   * The lease is taken here at the moment the first transfer is inserted, which is inside the
+   * transaction and before the cursor is touched.
+   */
+  it('writes nothing when the lease is taken during the scan, after the token was checked', async () => {
+    const account = anvilAccount(19).address.toLowerCase();
+    const paymentId = await insertPayment(account);
+    await payFrom(customer, tokenAddress, account, 25_000_000n);
+
+    let leaseTaken = false;
+    const racing = new Proxy(pool, {
+      get(target, property, receiver) {
+        if (property !== 'connect') {
+          return Reflect.get(target, property, receiver) as unknown;
+        }
+        return async () => {
+          const client = await target.connect();
+          return new Proxy(client, {
+            get(clientTarget, clientProperty, clientReceiver) {
+              if (clientProperty !== 'query') {
+                return Reflect.get(clientTarget, clientProperty, clientReceiver) as unknown;
+              }
+              return async (...parameters: unknown[]): Promise<unknown> => {
+                const statement = typeof parameters[0] === 'string' ? parameters[0] : '';
+                if (!leaseTaken && statement.includes('INSERT INTO payment_transfers')) {
+                  leaseTaken = true;
+                  // A different connection, so this commits while the scanner's transaction is open.
+                  await pool.query(
+                    `UPDATE block_cursors SET fencing_token = $1
+                      WHERE network_identifier = 'local-anvil'`,
+                    [(FENCING_TOKEN + 7n).toString()],
+                  );
+                }
+                return (clientTarget.query as (...args: unknown[]) => Promise<unknown>)(
+                  ...parameters,
+                );
+              };
+            },
+          });
+        };
+      },
+    });
+
+    const racingScanner = new ScanNetworkUseCase({
+      gateway,
+      paymentRepository: new PaymentRepository(pool),
+      paymentTransferRepository: new PaymentTransferRepository(racing),
+      blockCursorRepository: cursors,
+      observedBlockRepository: new ObservedBlockRepository(pool),
+      chainScanStore: new ChainScanStore(racing),
+      ulidFactory: new UlidFactory(),
+      now: () => new Date(),
+    });
+
+    const outcome = await racingScanner.execute(FENCING_TOKEN);
+
+    expect(leaseTaken).toBe(true);
+    expect(outcome.kind).toBe('lease_lost');
+    // Nothing written, and the newer holder's cursor untouched by the worker that lost the race.
+    expect(await countTransfers(paymentId)).toBe(0);
+    const cursor = await pool.query<{ fencing_token: string; last_scanned_height: string }>(
+      `SELECT fencing_token::text, last_scanned_height::text
+         FROM block_cursors WHERE network_identifier = 'local-anvil'`,
+    );
+    expect(cursor.rows[0]?.fencing_token).toBe((FENCING_TOKEN + 7n).toString());
   });
 });
 

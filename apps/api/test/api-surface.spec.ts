@@ -508,13 +508,38 @@ describe('signing secrets', () => {
     expect(response.statusCode).toBe(422);
   });
 
+  /**
+   * The status code alone proves nothing here. The test above shows the owner's own key is refused
+   * on this same request with the same 422, because it is the merchant's only secret, so asserting
+   * 422 for another merchant would pass whether isolation worked or not.
+   *
+   * The merchant is therefore given a second secret first, which makes the owner's request one that
+   * would succeed, and what is asserted is the observable security property: the secret another
+   * merchant asked to retire is still active afterwards.
+   */
   it('refuses to retire a secret belonging to another merchant', async () => {
+    const created = await post('/v1/webhooks/secrets');
+    const ownSecond = created.json<{ identifier: string }>().identifier;
+    const activeBefore = await get('/v1/webhooks/secrets');
+    const countBefore = activeBefore.json<{ data: unknown[] }>().data.length;
+    expect(countBefore).toBeGreaterThanOrEqual(2);
+
     const response = await server.inject({
       method: 'DELETE',
       url: '/v1/webhooks/secrets/whs_01K4QW6ZR2M8X4T7YQ0C3E1001',
       headers: { authorization: `Bearer ${otherMerchantKey}` },
     });
-    expect(response.statusCode).toBe(422);
+
+    expect(response.statusCode).toBeGreaterThanOrEqual(400);
+    const activeAfter = await get('/v1/webhooks/secrets');
+    expect(activeAfter.json<{ data: unknown[] }>().data.length).toBe(countBefore);
+
+    // Cleared up so the merchant is left as this suite found it.
+    await server.inject({
+      method: 'DELETE',
+      url: `/v1/webhooks/secrets/${ownSecond}`,
+      headers: { authorization: `Bearer ${testKey}` },
+    });
   });
 });
 

@@ -542,9 +542,10 @@ describe('overpayment', () => {
 
 describe('two workers evaluating the same payments', () => {
   /**
-   * The compare-and-swap, not the lease, is what makes this safe. Both workers see the same payment
-   * at the same version and exactly one write lands; the unique constraint on
-   * (payment_id, to_version) is the backstop if the comparison were ever bypassed.
+   * End to end, and decided by the queue rather than by the comparison. Only one worker claims the
+   * payment, so the other two find nothing and the compare-and-swap this describe is named for is
+   * never reached. Kept because one transition per payment is worth asserting through the real path,
+   * and followed by a test that reaches the comparison directly.
    */
   it('produces exactly one transition per payment', async () => {
     const account = anvilAccount(41).address.toLowerCase();
@@ -561,6 +562,50 @@ describe('two workers evaluating the same payments', () => {
     const row = await readPaymentRow(paymentId);
     expect(await transitionsFor(paymentId)).toEqual(['confirming']);
     expect(row.status_version).toBe(1);
+  });
+
+  /**
+   * The comparison itself, with the queue taken out of the way.
+   *
+   * Two writers hold a decision made against the same version, which is what happens when a claim
+   * expires under a worker that is slow rather than dead and a second worker picks the payment up.
+   * Exactly one write may land. The test above cannot reach this: `SKIP LOCKED` hands the payment to
+   * one worker and the others never call `saveTransition` at all, so removing the version predicate
+   * would leave it passing.
+   */
+  it('lets exactly one of two writers at the same version win', async () => {
+    // Account 42 belongs to the queue-claim test below, which asserts it claims exactly one payment.
+    const account = anvilAccount(44).address.toLowerCase();
+    const paymentId = await insertPayment(account);
+    await payTo(account, 25_000_000n);
+    await scanner.execute(FENCING_TOKEN);
+
+    const found = await payments.findByIdentifiers([paymentId]);
+    const loaded = found[0];
+    if (loaded === undefined) {
+      throw new Error(`No payment ${paymentId}`);
+    }
+    const expectedVersion = loaded.statusVersion;
+
+    const attempt = (causedBy: string): Promise<boolean> =>
+      payments.saveTransition({
+        payment: {
+          ...loaded,
+          status: 'confirming',
+          statusVersion: expectedVersion + 1,
+        },
+        previousStatus: loaded.status,
+        expectedVersion,
+        command: 'TRANSFER_CREDITED',
+        causedBy,
+      });
+
+    const landed = await Promise.all([attempt('writer-a'), attempt('writer-b')]);
+
+    expect(landed.filter(Boolean)).toHaveLength(1);
+    expect(await transitionsFor(paymentId)).toEqual(['confirming']);
+    const row = await readPaymentRow(paymentId);
+    expect(row.status_version).toBe(expectedVersion + 1);
   });
 });
 

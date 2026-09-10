@@ -317,11 +317,27 @@ describe('address allocation', () => {
     expect(Number(second.rows[0]?.nextval)).toBeGreaterThan(Number(first.rows[0]?.nextval));
   });
 
+  /**
+   * Two environments share one seed and one index space would make a live address and a test address
+   * the same key. The sequences are therefore separate, and separateness is only observable by
+   * advancing one and watching the other stand still, which is what this now does. Asking the live
+   * sequence for a value and checking it is not negative was true of any sequence at all.
+   */
   it('keeps the test and live index sequences independent', async () => {
-    const live = await pool.query<{ nextval: string }>(
+    const liveBefore = await pool.query<{ nextval: string }>(
       "SELECT nextval('payment_address_index_live') AS nextval",
     );
-    expect(Number(live.rows[0]?.nextval)).toBeGreaterThanOrEqual(0);
+
+    for (let drawn = 0; drawn < 3; drawn += 1) {
+      await pool.query("SELECT nextval('payment_address_index_test')");
+    }
+
+    const liveAfter = await pool.query<{ nextval: string }>(
+      "SELECT nextval('payment_address_index_live') AS nextval",
+    );
+
+    // Advanced by exactly one: its own draw, and none of the three taken from the test sequence.
+    expect(Number(liveAfter.rows[0]?.nextval)).toBe(Number(liveBefore.rows[0]?.nextval) + 1);
   });
 });
 

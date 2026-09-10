@@ -3,7 +3,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import type { Pool, QueryResult } from 'pg';
-import { createWalletClient, http, type Abi, type Address } from 'viem';
+import { createPublicClient, createWalletClient, http, type Abi, type Address } from 'viem';
 import { afterAll, beforeAll, beforeEach, describe, expect, inject, it } from 'vitest';
 
 import { EvaluatePaymentsUseCase } from '../src/application/evaluate-payments.use-case.js';
@@ -189,7 +189,7 @@ async function transitionsWithoutDelivery(): Promise<number> {
   return Number(result.rows[0]?.count ?? '0');
 }
 
-async function payTo(destination: string, amount: bigint): Promise<void> {
+async function payTo(destination: string, amount: bigint): Promise<bigint> {
   const wallet = createWalletClient({ account: customer, transport: http(rpcUrl) });
   await wallet.writeContract({
     address: tokenAddress as Address,
@@ -200,6 +200,74 @@ async function payTo(destination: string, amount: bigint): Promise<void> {
     chain: null,
   });
   await mineBlock(rpcUrl);
+  const client = createPublicClient({ transport: http(rpcUrl) });
+  const tip = await client.getBlock({ blockTag: 'latest' });
+  return tip.number;
+}
+
+/**
+ * INVARIANT C. The cursor never sits at or above a block whose transfer was not recorded.
+ *
+ * The mirror of invariant A and the more expensive half. A transfer above the cursor is re-scanned
+ * and the uniqueness key makes the replay a no-op; a cursor past a block whose transfer was never
+ * written is a payment nobody will look for again, because the window holding it is behind the
+ * resume point. That is the money-loss shape, and it was the one nothing asserted.
+ */
+async function cursorPastUnrecordedTransfer(
+  paymentId: string,
+  paidAtHeight: bigint,
+): Promise<number> {
+  const result = await pool.query<{ count: string }>(
+    `SELECT count(*)::text AS count
+       FROM block_cursors cursor
+      WHERE cursor.network_identifier = 'local-anvil'
+        AND cursor.last_scanned_height >= $2::bigint
+        AND NOT EXISTS (
+          SELECT 1 FROM payment_transfers transfer WHERE transfer.payment_id = $1
+        )`,
+    [paymentId, paidAtHeight.toString()],
+  );
+  return Number(result.rows[0]?.count ?? '0');
+}
+
+async function recordedTransferCount(paymentId: string): Promise<number> {
+  const result = await pool.query<{ count: string }>(
+    'SELECT count(*)::text AS count FROM payment_transfers WHERE payment_id = $1',
+    [paymentId],
+  );
+  return Number(result.rows[0]?.count ?? '0');
+}
+
+/**
+ * Puts the cursor one block below the transfer and clears what a previous tick wrote, so every
+ * iteration of a sweep has the same real work in front of it.
+ *
+ * Resetting to the tip instead, which is what this did, left nothing above the cursor to scan. Every
+ * tick then wrote nothing, and an invariant about what a write leaves behind held because no write
+ * ever happened.
+ */
+async function resetBelow(paidAtHeight: bigint): Promise<void> {
+  const client = createPublicClient({ transport: http(rpcUrl) });
+  const previous = await client.getBlock({ blockNumber: paidAtHeight - 1n });
+  await pool.query(
+    `INSERT INTO block_cursors
+       (network_identifier, last_scanned_height, last_scanned_reference, current_scan_range,
+        fencing_token)
+     VALUES ('local-anvil', $1, $2, 100, $3)
+     ON CONFLICT (network_identifier) DO UPDATE
+       SET last_scanned_height = EXCLUDED.last_scanned_height,
+           last_scanned_reference = EXCLUDED.last_scanned_reference,
+           consecutive_successes = 0,
+           halted_at = NULL,
+           halted_reason = NULL`,
+    [previous.number.toString(), previous.hash.toLowerCase(), FENCING_TOKEN.toString()],
+  );
+  await pool.query(`DELETE FROM observed_blocks WHERE network_identifier = 'local-anvil'`);
+  await pool.query('DELETE FROM payment_transfers');
+  await pool.query('DELETE FROM payment_evaluation_queue');
+  await pool.query(
+    `UPDATE payments SET status = 'pending', status_version = 0, credited_amount = 0`,
+  );
 }
 
 async function insertPayment(receivingAccount: string): Promise<string> {
@@ -221,7 +289,6 @@ async function insertPayment(receivingAccount: string): Promise<string> {
 }
 
 async function placeCursorAtTip(): Promise<void> {
-  const { createPublicClient } = await import('viem');
   const client = createPublicClient({ transport: http(rpcUrl) });
   const tip = await client.getBlock({ blockTag: 'latest' });
   await pool.query(
@@ -283,6 +350,36 @@ beforeEach(async () => {
   await placeCursorAtTip();
 });
 
+async function statusOf(paymentId: string): Promise<string> {
+  const result = await pool.query<{ status: string }>('SELECT status FROM payments WHERE id = $1', [
+    paymentId,
+  ]);
+  return result.rows[0]?.status ?? 'missing';
+}
+
+async function deliveriesFor(paymentId: string): Promise<number> {
+  const result = await pool.query<{ count: string }>(
+    'SELECT count(*)::text AS count FROM webhook_deliveries WHERE payment_id = $1',
+    [paymentId],
+  );
+  return Number(result.rows[0]?.count ?? '0');
+}
+
+/**
+ * Puts the payment back where a tick will pick it up again, including the queue row.
+ *
+ * Leaving the queue alone, which is what this sweep did, meant the first failing tick claimed the
+ * row and died holding the lease. Every later iteration then found nothing to claim and asserted an
+ * invariant about a transition that never happened.
+ */
+async function resetEvaluatorWork(paymentId: string): Promise<void> {
+  await pool.query('DELETE FROM webhook_deliveries');
+  await pool.query('DELETE FROM payment_status_transitions');
+  await pool.query(`UPDATE payments SET status = 'pending', status_version = 0`);
+  await pool.query('DELETE FROM payment_evaluation_queue');
+  await pool.query('INSERT INTO payment_evaluation_queue (payment_id) VALUES ($1)', [paymentId]);
+}
+
 describe('the scanner dying mid-transaction', () => {
   /**
    * The headline assertion, and the reason the fault is injected at every index rather than at one
@@ -290,17 +387,21 @@ describe('the scanner dying mid-transaction', () => {
    */
   it('never leaves a transfer above the cursor, at any point of failure', async () => {
     const account = anvilAccount(50).address.toLowerCase();
-    await insertPayment(account);
-    await payTo(account, 25_000_000n);
+    const paymentId = await insertPayment(account);
+    const paidAtHeight = await payTo(account, 25_000_000n);
 
-    // How many queries a clean tick makes, so the sweep covers every one of them.
+    // How many queries a clean tick makes, so the sweep covers every one of them. Counted with the
+    // cursor already below the transfer, because a tick with nothing to scan makes fewer queries
+    // than one that credits a payment and would leave most of the write path unswept.
+    await resetBelow(paidAtHeight);
     const counting = failingPoolAt(pool, Infinity);
     await buildScanner(counting.pool).execute(FENCING_TOKEN);
     const queriesInACleanTick = counting.queriesSeen();
     expect(queriesInACleanTick).toBeGreaterThan(3);
+    expect(await recordedTransferCount(paymentId)).toBe(1);
 
     for (let failAt = 1; failAt <= queriesInACleanTick; failAt += 1) {
-      await placeCursorAtTip();
+      await resetBelow(paidAtHeight);
       const faulty = failingPoolAt(pool, failAt);
       try {
         await buildScanner(faulty.pool).execute(FENCING_TOKEN);
@@ -308,7 +409,17 @@ describe('the scanner dying mid-transaction', () => {
         // A tick that fails is the ordinary case here; only the state it leaves behind is asserted.
       }
 
+      /**
+       * That the tick actually reached the query this iteration meant to break. Both invariants
+       * below are statements about what a write leaves behind, and both hold for free on a tick that
+       * writes nothing — which is what every iteration of this sweep used to be, because the cursor
+       * was reset to the tip and the window was empty. Without this the sweep silently stops being a
+       * sweep the moment the fixture stops giving it work.
+       */
+      expect(faulty.queriesSeen()).toBeGreaterThanOrEqual(failAt);
+
       expect(await transfersAboveCursor()).toBe(0);
+      expect(await cursorPastUnrecordedTransfer(paymentId, paidAtHeight)).toBe(0);
     }
   });
 
@@ -343,7 +454,7 @@ describe('the evaluator dying mid-transaction', () => {
    */
   it('never leaves a status change without its callback, at any point of failure', async () => {
     const account = anvilAccount(52).address.toLowerCase();
-    await insertPayment(account);
+    const paymentId = await insertPayment(account);
     await payTo(account, 25_000_000n);
     await buildScanner(pool).execute(FENCING_TOKEN);
 
@@ -351,11 +462,13 @@ describe('the evaluator dying mid-transaction', () => {
     await buildEvaluator(counting.pool).execute();
     const queriesInACleanTick = counting.queriesSeen();
     expect(queriesInACleanTick).toBeGreaterThan(3);
+    // A clean tick moves the payment and writes the notification for it, so the sweep below is
+    // walking a path that genuinely does both rather than one that finds nothing to do.
+    expect(await statusOf(paymentId)).toBe('confirming');
+    expect(await deliveriesFor(paymentId)).toBe(1);
 
     for (let failAt = 1; failAt <= queriesInACleanTick; failAt += 1) {
-      await pool.query('DELETE FROM webhook_deliveries');
-      await pool.query('DELETE FROM payment_status_transitions');
-      await pool.query(`UPDATE payments SET status = 'pending', status_version = 0`);
+      await resetEvaluatorWork(paymentId);
 
       const faulty = failingPoolAt(pool, failAt);
       try {
@@ -363,6 +476,14 @@ describe('the evaluator dying mid-transaction', () => {
       } catch {
         // As above: the failure is expected, and the invariant below is what is being checked.
       }
+
+      /**
+       * That this iteration reached the query it meant to break. The reset above exists for the same
+       * reason: the sweep used to leave the claimed queue row in place, so after the first failure
+       * every later iteration found nothing to claim, did nothing, and satisfied the invariant
+       * without ever exercising it.
+       */
+      expect(faulty.queriesSeen()).toBeGreaterThanOrEqual(failAt);
 
       expect(await transitionsWithoutDelivery()).toBe(0);
     }

@@ -504,6 +504,9 @@ describe('what an operator can see afterwards', () => {
 
     const settlement = await repository.findByPayment(paymentId);
     const transactions = await repository.transactionsFor(settlement?.identifier ?? '');
+    // Asserted before the loop, because every assertion about a fee lives inside it and a settlement
+    // that broadcast nothing would satisfy all of them by having nothing to check.
+    expect(transactions.length).toBeGreaterThan(0);
     for (const transaction of transactions) {
       expect(transaction.feePaidInNativeUnits).not.toBeNull();
       expect(transaction.feePaidInNativeUnits ?? 0n).toBeLessThanOrEqual(
