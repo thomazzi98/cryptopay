@@ -6,14 +6,34 @@
  * wrong silently.
  */
 
-/** Groups the whole part and trims the fractional part to what a person actually reads. */
+/** How many fractional digits it takes for an amount to show that it is there at all. */
+function digitsThatShowSomething(whole: string, fraction: string, requested: number): number {
+  if (/[1-9]/.test(whole)) {
+    return requested;
+  }
+  const firstSignificant = fraction.search(/[1-9]/);
+  if (firstSignificant < 0) {
+    return requested;
+  }
+  return Math.max(requested, firstSignificant + 1);
+}
+
+/**
+ * Groups the whole part and trims the fractional part to what a person actually reads.
+ *
+ * A non-zero amount never renders as zero. Two places is right for a six-decimal stablecoin and
+ * wrong for an eighteen-decimal currency, where a real payment of 0.004 would otherwise read as
+ * `0.00` and tell a merchant no money moved. Where rounding would erase the amount, enough places
+ * are kept to reach its first significant digit.
+ */
 export function formatAmount(display: string, maximumFractionDigits = 2): string {
   const [whole = '0', fraction = ''] = display.split('.', 2);
   const grouped = whole.replaceAll(/\B(?=(\d{3})+(?!\d))/g, ',');
   if (fraction === '') {
     return grouped;
   }
-  const trimmed = fraction.slice(0, maximumFractionDigits).padEnd(maximumFractionDigits, '0');
+  const digits = digitsThatShowSomething(whole, fraction, maximumFractionDigits);
+  const trimmed = fraction.slice(0, digits).padEnd(digits, '0');
   return `${grouped}.${trimmed}`;
 }
 

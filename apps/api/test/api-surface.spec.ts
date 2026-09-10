@@ -294,6 +294,42 @@ describe('what happened to a payment', () => {
     expect(body.data[0]?.explorerUrl).toContain('amoy.polygonscan.com');
   });
 
+  /**
+   * A chain that names no sender must publish none. The adapter used to fill this field with the
+   * account that was credited, which put the merchant's own deposit address under a heading that
+   * reads "From" and named it as the payer. Null is the honest answer and the contract admits it.
+   */
+  it('publishes no source account for a transfer whose chain names no sender', async () => {
+    await pool.query(
+      `INSERT INTO payment_transfers
+         (id, payment_id, network_identifier, transaction_reference, event_index, block_height,
+          block_reference, source_account, asset_reference, amount, classification, observation)
+       VALUES ('trf_01K4QW6ZR2M8X4T7YQ0C3E1003',$1,'polygon-amoy',$2,0,46903513,$3,NULL,$4,
+               1000000,'credited','observed')`,
+      [PAYMENT_ID, `0x${'d'.repeat(64)}`, `0x${'b'.repeat(64)}`, USDC_AMOY],
+    );
+
+    try {
+      const response = await get(`/v1/payments/${PAYMENT_ID}/transfers`);
+      expect(response.statusCode).toBe(200);
+
+      const body = response.json<{
+        data: { transactionReference: string; sourceAccount: string | null }[];
+      }>();
+      const unattributed = body.data.find(
+        (transfer) => transfer.transactionReference === `0x${'d'.repeat(64)}`,
+      );
+      expect(unattributed).toBeDefined();
+      expect(unattributed?.sourceAccount).toBeNull();
+      // The counterexample in the same response: where the chain does name a sender, it is published.
+      expect(
+        body.data.filter((transfer) => transfer.sourceAccount !== null).length,
+      ).toBeGreaterThan(0);
+    } finally {
+      await pool.query(`DELETE FROM payment_transfers WHERE id = 'trf_01K4QW6ZR2M8X4T7YQ0C3E1003'`);
+    }
+  });
+
   it('reports amounts as base units and a display string, never as a number', async () => {
     const response = await get(`/v1/payments/${PAYMENT_ID}/transfers`);
     const body = response.json<{ data: { amount: { baseUnits: string; display: string } }[] }>();

@@ -221,7 +221,10 @@ export const PaymentTransferSchema = z
     eventIndex: z.number().int().min(0),
     blockHeight: BlockHeightSchema,
     blockReference: z.string(),
-    sourceAccount: AccountSchema,
+    sourceAccount: AccountSchema.nullable().meta({
+      description:
+        'The account the value came from, where the chain names one. Null where it does not: a Solana transaction may debit several accounts, so there is no single sender to report and reporting one would be a guess.',
+    }),
     amount: AmountSchema,
     classification: TransferClassificationSchema,
     observation: TransferObservationSchema,

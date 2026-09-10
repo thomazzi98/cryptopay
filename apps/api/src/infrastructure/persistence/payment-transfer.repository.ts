@@ -29,7 +29,7 @@ export interface StoredTransfer {
   readonly eventIndex: number;
   readonly blockHeight: bigint;
   readonly blockReference: string;
-  readonly sourceAccount: string;
+  readonly sourceAccount: string | null;
   readonly assetReference: string;
   readonly amountInBaseUnits: bigint;
   readonly classification: TransferClassification;
@@ -45,7 +45,7 @@ interface TransferRow {
   readonly event_index: number;
   readonly block_height: string;
   readonly block_reference: string;
-  readonly source_account: string;
+  readonly source_account: string | null;
   readonly asset_reference: string;
   readonly amount: string;
   readonly classification: TransferClassification;

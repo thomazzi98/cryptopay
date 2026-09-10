@@ -242,6 +242,20 @@ describe('finding a native SOL payment', () => {
     });
   });
 
+  /**
+   * A Solana transaction may debit several accounts, so there is no single sender to record. The
+   * adapter used to record the credited account, which named the merchant's own deposit address as
+   * the payer everywhere the field is displayed. Not knowing is reported as not knowing.
+   */
+  it('names no sender, rather than naming the account it credited', async () => {
+    const result = await scanNative(
+      blockAt({ slot: 100, nativeBefore: 0, nativeAfter: 2_500_000_000 }),
+    );
+
+    expect(result.transfers[0]?.sourceAccount).toBeNull();
+    expect(result.transfers[0]?.destinationAccount).toBe(MERCHANT);
+  });
+
   it('ignores an account whose balance fell, which is the payer', async () => {
     const result = await scanNative(
       blockAt({ slot: 100, nativeBefore: 0, nativeAfter: 2_500_000_000 }),

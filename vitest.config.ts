@@ -80,7 +80,12 @@ export default defineConfig({
           // deserves a pure test, and this project needs no DOM to run one.
           name: 'web',
           root: './apps/web',
-          include: ['src/lib/**/*.spec.ts'],
+          include: ['src/**/*.spec.ts'],
+        },
+        // Next resolves this alias from tsconfig; Vitest does not read that file, so a module
+        // imported through it resolves as a bare package name and fails.
+        resolve: {
+          alias: { '@': resolve(import.meta.dirname, 'apps/web/src') },
         },
       },
       {

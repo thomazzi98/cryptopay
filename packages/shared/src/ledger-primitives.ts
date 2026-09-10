@@ -79,7 +79,11 @@ export interface AssetDescriptor {
 export interface ObservedTransfer {
   readonly reference: ChainTransferReference;
   readonly position: LedgerPosition;
-  readonly sourceAccount: string;
+  /**
+   * Where the value came from, where the chain names one account. Null where it does not: a Solana
+   * transaction may debit several accounts, and naming one of them would be a guess.
+   */
+  readonly sourceAccount: string | null;
   readonly destinationAccount: string;
   readonly assetReference: string;
   readonly amountInBaseUnits: bigint;

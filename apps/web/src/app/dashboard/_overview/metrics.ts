@@ -119,6 +119,7 @@ function isSuccessful(payment: OverviewPayment): boolean {
 }
 
 interface AssetVolume {
+  readonly key: string;
   readonly reference: string;
   readonly symbol: string;
   readonly decimals: number;
@@ -127,21 +128,32 @@ interface AssetVolume {
 }
 
 /**
- * Totals are keyed on the contract address, never on the symbol: bridged USDC.e reports the
- * byte-identical symbol "USDC", so a total keyed on the symbol quietly adds two different assets.
+ * An asset's identity is its network and its reference together, and both halves are load-bearing.
+ *
+ * The reference alone is not enough because every chain's own currency carries the same sentinel
+ * reference, so a total keyed on it adds POL to TRX to SOL - three different currencies, at three
+ * different scales, summed as integers and then labelled with whichever symbol arrived first.
+ *
+ * The symbol alone is not enough either: bridged USDC.e reports the byte-identical symbol "USDC",
+ * so a total keyed on the symbol quietly adds two different tokens.
  */
-function volumeByAsset(payments: readonly OverviewPayment[]): readonly AssetVolume[] {
+function assetKeyOf(payment: OverviewPayment): string {
+  return `${payment.network}:${payment.asset.reference}`;
+}
+
+export function volumeByAsset(payments: readonly OverviewPayment[]): readonly AssetVolume[] {
   const totals: AssetVolume[] = [];
   for (const payment of payments) {
     if (!isSuccessful(payment)) {
       continue;
     }
-    const reference = payment.asset.reference;
+    const key = assetKeyOf(payment);
     const credited = BigInt(payment.creditedAmount.baseUnits);
-    const existing = totals.find((candidate) => candidate.reference === reference);
+    const existing = totals.find((candidate) => candidate.key === key);
     if (existing === undefined) {
       totals.push({
-        reference,
+        key,
+        reference: payment.asset.reference,
         symbol: payment.asset.symbol,
         decimals: payment.asset.decimals,
         total: credited,
@@ -227,8 +239,7 @@ function buildVolumeKpi(
 
   const otherAssets = ranked.length - 1;
   const previousTotal =
-    volumeByAsset(previous).find((candidate) => candidate.reference === leading.reference)?.total ??
-    0n;
+    volumeByAsset(previous).find((candidate) => candidate.key === leading.key)?.total ?? 0n;
   const difference =
     leading.total > previousTotal ? leading.total - previousTotal : previousTotal - leading.total;
 

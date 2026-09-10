@@ -182,7 +182,16 @@ export function TransfersPanel({
                   </td>
 
                   <td className="px-4 py-3">
-                    <Copyable value={transfer.sourceAccount} className={struck} />
+                    {transfer.sourceAccount === null ? (
+                      <span
+                        title="A Solana transaction may debit several accounts, so the chain names no single sender."
+                        className="text-xs text-text-subtle"
+                      >
+                        not named by the chain
+                      </span>
+                    ) : (
+                      <Copyable value={transfer.sourceAccount} className={struck} />
+                    )}
                   </td>
 
                   <td className={classNames('px-4 py-3 text-right', struck)}>

@@ -255,8 +255,9 @@ export class SolanaChainGateway implements ChainGateway {
           position: toPosition(block),
           destinationAccount: credit.account,
           // Solana has no single sender: one transaction may debit several accounts. Naming one
-          // would be a guess, so the field carries the account that was credited.
-          sourceAccount: credit.account,
+          // would be a guess, and the guess this used to make was the credited account, which put
+          // the merchant's own deposit address under a heading that reads "From".
+          sourceAccount: null,
           assetReference: credit.asset,
           amountInBaseUnits: credit.amount,
         });
