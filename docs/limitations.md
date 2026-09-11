@@ -135,6 +135,14 @@ The integration suite runs against a real PostgreSQL 18 and a real Anvil chain, 
 rewrites chain history with a snapshot and a revert rather than stubbing a provider. Those results
 are evidence.
 
+The gateway contract at `/api/v1` has been driven end to end by the
+[payment gateway](https://github.com/thomazzi98/mini-payment-gateway) against this deployment
+running beside a local chain: a payment created through the contract, paid on Anvil, detected and
+confirmed by the chain worker, and delivered as a signed webhook that the gateway verified. That is
+evidence about the contract and the callback path; it was produced with
+`PREFER_LOCAL_DEVELOPMENT_NETWORKS=true`, and no payment has been sent through that contract on a
+public network.
+
 They are evidence about **this** code under **these** conditions. They say nothing about behaviour
 under sustained production load, against a rate-limited provider, during a multi-hour network
 partition, or with a database that has been running for a year. Nothing here has run for a year.
