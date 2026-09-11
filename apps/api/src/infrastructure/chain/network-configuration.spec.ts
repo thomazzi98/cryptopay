@@ -26,6 +26,8 @@ import {
   NotALocalDevelopmentNetworkError,
   registerLocalDevelopmentAsset,
   resolveAssetByReference,
+  resolveCurrencyForNetwork,
+  resolveNetwork,
   requireLedgerIdentity,
   requireEvmChainId,
 } from './network-configuration.js';
@@ -553,5 +555,57 @@ describe('the denylist as an enforced rule rather than a note', () => {
     expect(isAllowedAssetReference('polygon-mainnet', USDC_BRIDGED_POLYGON_MAINNET_ADDRESS)).toBe(
       false,
     );
+  });
+});
+
+describe('resolving a family for the gateway contract', () => {
+  it('gives a live key the live deployment and a test key the public testnet', () => {
+    expect(resolveNetwork('polygon', 'live')?.networkIdentifier).toBe('polygon-mainnet');
+    expect(resolveNetwork('polygon', 'test')?.networkIdentifier).toBe('polygon-amoy');
+    expect(resolveNetwork('tron', 'test')?.networkIdentifier).toBe('tron-nile');
+    expect(resolveNetwork('solana', 'test')?.networkIdentifier).toBe('solana-devnet');
+  });
+
+  it('never resolves to a local chain unless the deployment opted in', () => {
+    for (const family of NETWORK_FAMILIES) {
+      for (const environment of ['test', 'live'] as const) {
+        const resolved = resolveNetwork(family, environment);
+        expect(resolved?.networkIdentifier).not.toMatch(/local/);
+      }
+    }
+  });
+
+  it('prefers the local chain for a test key once opted in, and only for a test key', () => {
+    const options = { preferLocalDevelopmentNetworks: true };
+    expect(resolveNetwork('polygon', 'test', options)?.networkIdentifier).toBe('local-anvil');
+    expect(resolveNetwork('tron', 'test', options)?.networkIdentifier).toBe('tron-local');
+    expect(resolveNetwork('polygon', 'live', options)?.networkIdentifier).toBe('polygon-mainnet');
+  });
+});
+
+describe('resolving a currency for the gateway contract', () => {
+  it('answers from the frozen registry for a real network', () => {
+    expect(resolveCurrencyForNetwork('polygon-amoy', 'usdc')?.reference).toBe(
+      USDC_POLYGON_AMOY_ADDRESS,
+    );
+    expect(resolveCurrencyForNetwork('polygon-amoy', 'DOGE')).toBeNull();
+  });
+
+  it('never lets a real network gain a currency at runtime', () => {
+    expect(resolveCurrencyForNetwork('polygon-mainnet', 'MOCK')).toBeNull();
+  });
+
+  it('finds a token registered on the local chain at boot', () => {
+    registerLocalDevelopmentAsset('local-anvil', {
+      reference: '0x5fbdb2315678afecb367f032d93f642f64180aa3',
+      symbol: 'USDC',
+      decimals: 6,
+    });
+    expect(resolveCurrencyForNetwork('local-anvil', 'usdc')).toStrictEqual({
+      currency: 'USDC',
+      reference: '0x5fbdb2315678afecb367f032d93f642f64180aa3',
+      decimals: 6,
+    });
+    expect(resolveCurrencyForNetwork('local-anvil', 'ETH')?.decimals).toBe(18);
   });
 });

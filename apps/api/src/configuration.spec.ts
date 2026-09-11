@@ -272,3 +272,30 @@ describe('settlement configuration', () => {
     expect(load({ SETTLEMENT_ENABLED: 'true' }).settlementEnabled).toBe(true);
   });
 });
+
+describe('preferring local development networks', () => {
+  it('is off unless asked for in so many words', () => {
+    expect(loadConfiguration(environment()).preferLocalDevelopmentNetworks).toBe(false);
+    expect(
+      loadConfiguration(environment({ PREFER_LOCAL_DEVELOPMENT_NETWORKS: 'yes' }))
+        .preferLocalDevelopmentNetworks,
+    ).toBe(false);
+    expect(
+      loadConfiguration(environment({ PREFER_LOCAL_DEVELOPMENT_NETWORKS: 'true' }))
+        .preferLocalDevelopmentNetworks,
+    ).toBe(true);
+  });
+
+  it('refuses to start in production when set, exactly as the allowlist does', () => {
+    expect(loadProductionPreferringLocalNetworks).toThrow(ConfigurationError);
+    expect(loadProductionPreferringLocalNetworks).toThrow(/NODE_ENV=production/);
+  });
+});
+
+function loadProductionPreferringLocalNetworks() {
+  return loadConfiguration({
+    ...REQUIRED,
+    NODE_ENV: 'production',
+    PREFER_LOCAL_DEVELOPMENT_NETWORKS: 'true',
+  });
+}

@@ -120,6 +120,17 @@ export function buildApplicationServer(
 ): ApplicationServer {
   assertTokenRegistryIsSound();
 
+  // The same registration the chain worker makes. Without it the API quotes a
+  // local chain with no assets, refuses USDC on it, and the worker watches for
+  // a token nobody can ask to be paid in.
+  if (configuration.localAnvilUsdcAddress !== undefined) {
+    registerLocalDevelopmentAsset('local-anvil', {
+      reference: configuration.localAnvilUsdcAddress,
+      symbol: 'USDC',
+      decimals: 6,
+    });
+  }
+
   const merchantRepository = new MerchantRepository(databasePool);
   const paymentRepository = new PaymentRepository(databasePool);
   const idempotencyRepository = new IdempotencyRepository(databasePool);

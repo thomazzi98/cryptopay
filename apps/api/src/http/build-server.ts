@@ -267,6 +267,7 @@ export function buildServer(dependencies: ServerDependencies): ApplicationServer
   });
   registerGatewayPaymentRoutes(server, {
     authenticate,
+    preferLocalDevelopmentNetworks: configuration.preferLocalDevelopmentNetworks,
     paymentCreator: dependencies.paymentCreator,
     paymentCanceler: dependencies.paymentCanceler,
     paymentRepository: dependencies.paymentRepository,

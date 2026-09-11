@@ -1,4 +1,4 @@
-import { TOKEN_REGISTRY } from './token-registry.js';
+import { resolveToken, TOKEN_REGISTRY } from './token-registry.js';
 import {
   SOLANA_DEVNET_EXPLORER_BASE_URL,
   SOLANA_DEVNET_GENESIS_IDENTITY,
@@ -504,9 +504,22 @@ export function requireEvmChainId(configuration: NetworkConfiguration): number {
  * payment lands on follows from the API key's environment rather than from the request body. A test
  * key cannot ask for mainnet, because mainnet is not a word it can say.
  */
+export interface ResolveNetworkOptions {
+  /**
+   * Lets a test-environment family resolve to its local development chain instead of the public
+   * testnet, so a whole deployment can be exercised end to end against a chain running beside it.
+   *
+   * Off by default and refused in production by configuration: a caller naming a family must
+   * never reach a local chain by accident, and the exclusion below stays the rule everywhere the
+   * operator has not said otherwise for this one non-production deployment.
+   */
+  readonly preferLocalDevelopmentNetworks?: boolean;
+}
+
 export function resolveNetwork(
   family: NetworkFamily,
   environment: Environment,
+  options: ResolveNetworkOptions = {},
 ): NetworkConfiguration | null {
   const candidates = Object.values(NETWORK_CONFIGURATIONS).filter(
     (configuration) =>
@@ -516,10 +529,40 @@ export function resolveNetwork(
   // reachable from the public contract at all. The exclusion is by membership of the local set
   // rather than by naming one network, because naming one is exactly how `tron-local` became the
   // network a `cp_test_` key received when it asked for TRON.
-  const preferred = candidates.find(
-    (configuration) => !LOCAL_DEVELOPMENT_NETWORKS.has(configuration.networkIdentifier),
-  );
+  const isLocal = (configuration: NetworkConfiguration): boolean =>
+    LOCAL_DEVELOPMENT_NETWORKS.has(configuration.networkIdentifier);
+  // The opt-in applies to the test environment only. A live key names live chains, and there is
+  // no local stand-in for one.
+  const preferLocal = options.preferLocalDevelopmentNetworks === true && environment === 'test';
+  const preferred =
+    (preferLocal ? candidates.find((configuration) => isLocal(configuration)) : undefined) ??
+    candidates.find((configuration) => !isLocal(configuration));
   return preferred === undefined ? null : networkConfigurationFor(preferred.networkIdentifier);
+}
+
+/**
+ * The currency a gateway caller named, resolved for the network their key reached.
+ *
+ * The frozen token registry answers for every real network. A local development chain deploys its
+ * token on every start, so its address is registered at boot rather than frozen, and only there is
+ * the runtime allowlist consulted. A real network never gains a currency this way: the fall-through
+ * is gated on membership of the local set, which is one line to see.
+ */
+export function resolveCurrencyForNetwork(
+  network: NetworkIdentifier,
+  currency: string,
+): { readonly currency: string; readonly reference: string; readonly decimals: number } | null {
+  const registered = resolveToken(network, currency);
+  if (registered !== null) {
+    return registered;
+  }
+  if (!LOCAL_DEVELOPMENT_NETWORKS.has(network)) {
+    return null;
+  }
+  const allowed = findAllowedAsset(network, currency);
+  return allowed === null
+    ? null
+    : { currency: allowed.symbol, reference: allowed.reference, decimals: allowed.decimals };
 }
 
 export function networksForEnvironment(environment: Environment): readonly NetworkConfiguration[] {

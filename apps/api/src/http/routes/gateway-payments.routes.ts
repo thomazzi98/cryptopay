@@ -7,8 +7,10 @@ import type {
   CreatePaymentUseCase,
 } from '../../application/create-payment.use-case.js';
 import type { Payment } from '../../domain/payment.js';
-import { resolveNetwork } from '../../infrastructure/chain/network-configuration.js';
-import { resolveToken } from '../../infrastructure/chain/token-registry.js';
+import {
+  resolveCurrencyForNetwork,
+  resolveNetwork,
+} from '../../infrastructure/chain/network-configuration.js';
 import type { BlockCursorRepository } from '../../infrastructure/persistence/block-cursor.repository.js';
 import type { IdempotencyRepository } from '../../infrastructure/persistence/idempotency.repository.js';
 import type { MerchantRepository } from '../../infrastructure/persistence/merchant.repository.js';
@@ -70,6 +72,10 @@ class LostReservationError extends Error {
 
 export interface GatewayPaymentRouteDependencies {
   readonly authenticate: AuthenticationHook;
+  /**
+   * Non-production only, and enforced as such by configuration. See resolveNetwork.
+   */
+  readonly preferLocalDevelopmentNetworks: boolean;
   readonly paymentCreator: CreatePaymentUseCase;
   readonly paymentCanceler: CancelPaymentUseCase;
   readonly paymentRepository: PaymentRepository;
@@ -184,6 +190,7 @@ export function registerGatewayPaymentRoutes(
       const network = resolveNetwork(
         parsed.data.network as NetworkFamily,
         authenticated.environment,
+        { preferLocalDevelopmentNetworks: dependencies.preferLocalDevelopmentNetworks },
       );
       if (network === null) {
         throw gatewayError(
@@ -193,7 +200,7 @@ export function registerGatewayPaymentRoutes(
         );
       }
 
-      const token = resolveToken(network.networkIdentifier, parsed.data.currency);
+      const token = resolveCurrencyForNetwork(network.networkIdentifier, parsed.data.currency);
       if (token === null) {
         throw gatewayError(
           'validation_failed',

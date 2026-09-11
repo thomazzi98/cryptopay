@@ -176,6 +176,16 @@ const ConfigurationSchema = z
       .array(z.string().regex(HOST_AND_PORT_PATTERN, 'Expected host:port'))
       .max(8)
       .default([]),
+
+    /**
+     * Whether the gateway contract at `/api/v1` resolves a test-environment family to the local
+     * development chain rather than the public testnet. Exists so the whole deployment can be
+     * driven end to end against a chain running beside it, and for nothing else: it is refused in
+     * production below, exactly as the private destination allowlist is.
+     */
+    preferLocalDevelopmentNetworks: z
+      .preprocess((value) => value === 'true', z.boolean())
+      .default(false),
   })
   .superRefine((configuration, context) => {
     for (const [field, value] of [
@@ -209,6 +219,18 @@ const ConfigurationSchema = z
         path: ['polygonMainnetSpendCeiling'],
         message:
           'POLYGON_MAINNET_SPEND_CEILING must be set when settlement is enabled in production. Refusing to start a signer with no upper bound on what it can spend.',
+      });
+    }
+
+    if (
+      configuration.nodeEnvironment === 'production' &&
+      configuration.preferLocalDevelopmentNetworks
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['preferLocalDevelopmentNetworks'],
+        message:
+          'PREFER_LOCAL_DEVELOPMENT_NETWORKS must not be set when NODE_ENV=production. Refusing to start rather than let a production deployment resolve a family to a local chain.',
       });
     }
 
@@ -275,6 +297,7 @@ export function loadConfiguration(source: EnvironmentSource): Configuration {
     callbackPrivateDestinationAllowlist: parseCommaSeparated(
       source.CALLBACK_PRIVATE_DESTINATION_ALLOWLIST,
     ),
+    preferLocalDevelopmentNetworks: optionalText(source.PREFER_LOCAL_DEVELOPMENT_NETWORKS),
   });
 
   if (!result.success) {
