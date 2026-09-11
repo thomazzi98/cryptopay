@@ -49,6 +49,17 @@ to `.env`.
 For the deployment shape instead — five processes, four database roles, and a merchant endpoint that
 verifies the signatures it receives — use `docker compose up`.
 
+To run it beside a local chain, with a mock USDC deployed and a payer funded so that a payment can be
+created, paid and confirmed with nothing external in the loop:
+
+```bash
+docker network create payment-demo
+docker compose -f docker-compose.yml -f docker-compose.local-chain.yml up -d --build
+```
+
+That is the shape the [payment gateway](https://github.com/thomazzi98/mini-payment-gateway) drives
+end to end through the `/api/v1` contract, on the `payment-demo` network the overlay joins.
+
 ## Architecture
 
 ```

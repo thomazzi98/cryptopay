@@ -1,0 +1,95 @@
+# A local EVM chain beside the stack, and the gateway contract pointed at it.
+#
+#   docker network create payment-demo
+#   docker compose -f docker-compose.yml -f docker-compose.local-chain.yml up -d --build
+#
+# Anvil mines a block every two seconds, so confirmations accrue without anyone asking; a bootstrap
+# deploys the mock USDC at a deterministic address and funds a payer, so the address can be handed
+# to the API and the chain worker in configuration before the deployment has happened.
+#
+# PREFER_LOCAL_DEVELOPMENT_NETWORKS is what lets a `cp_test_` key asking for `polygon` land on this
+# chain rather than on Amoy. It is refused in production by configuration, like the private
+# destination allowlist beside it, and it is the only reason this overlay exists: the whole
+# deployment can be driven end to end — payment, transfer, detection, confirmation, signed callback —
+# by something running next to it, with nothing external in the loop.
+#
+# The api and the callback worker also join `payment-demo`, an external network shared with the
+# payment gateway and the notification platform, each brought up from its own repository. The api
+# answers to `cryptopay` there; the callback worker reaches `payment-gateway:3000`, which the
+# allowlist names explicitly so nothing else private becomes reachable.
+
+x-local-chain: &local-chain
+  LOCAL_ANVIL_RPC_URLS: http://anvil:8545
+  LOCAL_ANVIL_USDC_ADDRESS: '0x5fbdb2315678afecb367f032d93f642f64180aa3'
+
+services:
+  anvil:
+    image: ghcr.io/foundry-rs/foundry:v1.8.1
+    command:
+      - >-
+        anvil --host 0.0.0.0 --port 8545 --chain-id 31337 --block-time 2
+        --state /state/anvil.json --state-interval 5
+    volumes:
+      - anvil-state:/state
+    # Published on loopback so a wallet or a test on the host can pay into the chain.
+    ports:
+      - '127.0.0.1:8545:8545'
+    networks: [internal]
+    healthcheck:
+      test: ['CMD-SHELL', 'cast chain-id --rpc-url http://127.0.0.1:8545']
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+
+  anvil-bootstrap:
+    image: node:24-alpine
+    command: ['node', '/bootstrap/local-chain-bootstrap.mjs']
+    environment:
+      ANVIL_RPC_URL: http://anvil:8545
+      MOCK_TOKEN_ARTIFACT: /bootstrap/mock-usdc.json
+      EXPECTED_TOKEN_ADDRESS: '0x5fbdb2315678afecb367f032d93f642f64180aa3'
+    volumes:
+      - ./scripts/local-chain-bootstrap.mjs:/bootstrap/local-chain-bootstrap.mjs:ro
+      - ./apps/api/test/fixtures/mock-usdc.json:/bootstrap/mock-usdc.json:ro
+    depends_on:
+      anvil:
+        condition: service_healthy
+    networks: [internal]
+    restart: 'no'
+
+  bootstrap:
+    environment:
+      <<: *local-chain
+    depends_on:
+      anvil-bootstrap:
+        condition: service_completed_successfully
+
+  api:
+    environment:
+      <<: *local-chain
+      PREFER_LOCAL_DEVELOPMENT_NETWORKS: 'true'
+      CALLBACK_PRIVATE_DESTINATION_ALLOWLIST: demo-receiver:8080,payment-gateway:3000
+    networks:
+      payment-demo:
+        aliases: [cryptopay]
+
+  chain-worker:
+    environment:
+      <<: *local-chain
+    depends_on:
+      anvil:
+        condition: service_healthy
+
+  callback-worker:
+    environment:
+      CALLBACK_PRIVATE_DESTINATION_ALLOWLIST: demo-receiver:8080,payment-gateway:3000
+    networks:
+      payment-demo: {}
+
+networks:
+  payment-demo:
+    external: true
+
+volumes:
+  anvil-state:

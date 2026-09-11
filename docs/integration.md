@@ -243,6 +243,10 @@ Four things about that exchange are worth knowing before you build on it.
 **You name a chain family, not a deployment.** `network` is `polygon`, `tron` or `solana`. Which
 deployment of that family the payment lands on follows from the environment of the API key you used,
 so a `cp_test_` key has no way to spell mainnet. Ask `GET /v1/networks` for what a key can reach.
+One deployment-side switch exists for development only: with
+`PREFER_LOCAL_DEVELOPMENT_NETWORKS=true` a test key's `polygon` lands on the local Anvil chain
+rather than on Amoy, which is how the whole stack is driven end to end by a gateway running beside it
+(`docker-compose.local-chain.yml`). The API refuses to start with it in production.
 
 **You name a currency, never a contract.** `currency` is `USDC`, `USDT`, `POL` and so on, and the
 field will not accept an address. The server resolves the pair to an asset. This is why the Polygon
